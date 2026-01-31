@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification } from 'antd';
-import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image as ImageIcon } from 'lucide-react';
+import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { useSocket } from '../hooks/useSocket';
 import { apiFetch, assetUrl } from '../lib/runtime';
@@ -699,18 +699,6 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
         }
     };
 
-    const importProfilePhoto = async (chatId: string) => {
-        try {
-            const res = await apiFetch(`/api/devices/${device.id}/chats/${encodeURIComponent(chatId)}/import-profile-photo`, { method: 'POST' });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data?.success) return;
-            const nextId = String(data.chatId || chatId);
-            const nextUrl = String(data.url || '');
-            setChats(prev => prev.map(c => c.id === chatId || c.id === nextId ? { ...c, id: nextId, profilePhotoUrl: nextUrl } : c));
-            if (activeChat === chatId && nextId !== chatId) setActiveChat(nextId);
-        } catch {}
-    };
-
     const startLinking = async () => {
         setCurrentDevice(prev => ({ ...prev, status: 'CONNECTING' }));
         try {
@@ -1099,15 +1087,6 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                                                     <span style={{ fontSize: '11px', color: '#8696a0' }}>
                                                         {new Date(chat.lastMessageTime).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
                                                     </span>
-                                                    <div onClick={(e) => e.stopPropagation()}>
-                                                        <Button
-                                                            type="text"
-                                                            size="small"
-                                                            icon={<ImageIcon size={14} color="#8696a0" />}
-                                                            style={{ minWidth: 24, padding: 0 }}
-                                                            onClick={() => importProfilePhoto(chat.id)}
-                                                        />
-                                                    </div>
                                                     <div onClick={(e) => e.stopPropagation()}>
                                                         <Popconfirm
                                                             title="¿Eliminar chat?"

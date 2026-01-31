@@ -184,6 +184,8 @@ export class DeviceManager {
     private reconnectAttempts: Map<string, number> = new Map();
     private connectWatchdogs: Map<string, NodeJS.Timeout> = new Map();
     private pairingCodeLastAt: Map<string, number> = new Map();
+    private avatarFetchInFlight: Map<string, Set<string>> = new Map();
+    private avatarFetchLastAt: Map<string, number> = new Map();
 
     private constructor() {
         ensureDir(DB_ROOT);
@@ -198,6 +200,74 @@ export class DeviceManager {
             clearTimeout(t);
             this.connectWatchdogs.delete(deviceId);
         }
+    }
+
+    private scheduleProfilePhotoFetch(deviceId: string, chatId: string) {
+        const sock = this.sessions.get(deviceId);
+        const store = stores.get(deviceId);
+        if (!sock || !store) return;
+        if (!chatId || chatId.endsWith('@g.us')) return;
+
+        const canonicalId = resolveCanonicalChatId(store, chatId);
+        if (!canonicalId || canonicalId.endsWith('@g.us')) return;
+
+        const key = chatKeyOf(canonicalId);
+        if (!key) return;
+
+        const inFlight = this.avatarFetchInFlight.get(deviceId) || new Set<string>();
+        if (inFlight.has(key)) return;
+
+        const ttlMs = 7 * 24 * 60 * 60 * 1000;
+        const cached = store.profilePhotos.get(canonicalId);
+        if (cached && Date.now() - cached.updatedAt < ttlMs) return;
+
+        const lastAt = this.avatarFetchLastAt.get(deviceId) || 0;
+        const now = Date.now();
+        const minGapMs = 800;
+        if (now - lastAt < minGapMs) {
+            setTimeout(() => this.scheduleProfilePhotoFetch(deviceId, canonicalId), minGapMs);
+            return;
+        }
+
+        inFlight.add(key);
+        this.avatarFetchInFlight.set(deviceId, inFlight);
+        this.avatarFetchLastAt.set(deviceId, now);
+
+        void (async () => {
+            try {
+                const fileName = `${crypto.createHash('sha1').update(key).digest('hex')}.jpg`;
+                const dir = path.join(DB_ROOT, 'storage', 'avatars', deviceId);
+                ensureDir(dir);
+                const filePath = path.join(dir, fileName);
+                const urlPath = `/storage/avatars/${encodeURIComponent(deviceId)}/${fileName}`;
+
+                const existing = store.profilePhotos.get(canonicalId);
+                if (existing && fs.existsSync(filePath)) {
+                    store.profilePhotos.set(canonicalId, { url: existing.url, updatedAt: Date.now() });
+                    return;
+                }
+
+                const profileUrl = typeof (sock as any).profilePictureUrl === 'function'
+                    ? await (sock as any).profilePictureUrl(canonicalId, 'image').catch(() => null)
+                    : null;
+
+                if (!profileUrl) return;
+
+                const resp = await fetch(profileUrl);
+                if (!resp.ok) return;
+                const arr = await resp.arrayBuffer();
+                const buf = Buffer.from(arr);
+                fs.writeFileSync(filePath, buf);
+
+                store.profilePhotos.set(canonicalId, { url: urlPath, updatedAt: Date.now() });
+            } catch {} finally {
+                const s = this.avatarFetchInFlight.get(deviceId);
+                if (s) {
+                    s.delete(key);
+                    if (s.size === 0) this.avatarFetchInFlight.delete(deviceId);
+                }
+            }
+        })();
     }
 
     private startConnectWatchdog(deviceId: string, sock: any) {
@@ -761,6 +831,8 @@ export class DeviceManager {
                     });
                 }
 
+                this.scheduleProfilePhotoFetch(deviceId, unifiedChatId);
+
                 // Emitir con unifiedChatId para que el frontend use el mismo ID
                 this.io?.emit('message:new', {
                     deviceId,
@@ -1297,7 +1369,13 @@ export class DeviceManager {
                 };
             });
 
-            return result.sort((a: any, b: any) => b.lastMessageTime - a.lastMessageTime);
+            const sorted = result.sort((a: any, b: any) => b.lastMessageTime - a.lastMessageTime);
+            for (const chat of sorted.slice(0, 15)) {
+                if (chat?.isGroup) continue;
+                if (chat?.profilePhotoUrl) continue;
+                this.scheduleProfilePhotoFetch(deviceId, String(chat.id));
+            }
+            return sorted;
         } catch (error) {
             console.error('Error al obtener chats:', error);
             return [];
