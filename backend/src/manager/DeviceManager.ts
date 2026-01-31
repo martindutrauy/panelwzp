@@ -1167,19 +1167,46 @@ export class DeviceManager {
             const chats = Array.from(store.chats.values());
             console.log(`[${deviceId}] Chats encontrados en store: ${chats.length}`);
 
-            return chats.map((chat: any) => {
-                // Buscar nombre del contacto si no está ya definido
-                const contactName = store.contacts.get(chat.id) || chat.name;
-                const displayName = contactName || chat.id.split('@')[0];
-                
+            const merged = new Map<string, { ids: string[]; lastMessageTime: number; unreadCount: number; names: string[] }>();
+            for (const chat of chats) {
+                const id = String(chat?.id || '');
+                if (!id) continue;
+                const key = chatKeyOf(id);
+                const entry = merged.get(key) || { ids: [], lastMessageTime: 0, unreadCount: 0, names: [] };
+                if (!entry.ids.includes(id)) entry.ids.push(id);
+
+                const ts = Number(chat?.conversationTimestamp || 0);
+                if (Number.isFinite(ts) && ts > entry.lastMessageTime) entry.lastMessageTime = ts;
+
+                const unread = Number(chat?.unreadCount || 0);
+                if (Number.isFinite(unread) && unread > 0) entry.unreadCount += unread;
+
+                const n = String(chat?.name || '').trim();
+                if (n) entry.names.push(n);
+
+                merged.set(key, entry);
+            }
+
+            const result = Array.from(merged.values()).map((entry) => {
+                const canonicalId = entry.ids.reduce((best, id) => preferredChatId(best, id), entry.ids[0] || '');
+                const contactName =
+                    store.contacts.get(canonicalId) ||
+                    entry.ids.map((id) => store.contacts.get(id)).find(Boolean) ||
+                    entry.names.find(Boolean) ||
+                    '';
+
+                const displayName = String(contactName || '').trim() || canonicalId.split('@')[0];
+                const lastMessageTime = entry.lastMessageTime || Date.now();
                 return {
-                    id: chat.id,
+                    id: canonicalId,
                     name: displayName,
-                    lastMessageTime: chat.conversationTimestamp || Date.now(),
-                    unreadCount: chat.unreadCount || 0,
-                    isGroup: chat.id.endsWith('@g.us')
+                    lastMessageTime,
+                    unreadCount: entry.unreadCount || 0,
+                    isGroup: canonicalId.endsWith('@g.us')
                 };
-            }).sort((a: any, b: any) => b.lastMessageTime - a.lastMessageTime);
+            });
+
+            return result.sort((a: any, b: any) => b.lastMessageTime - a.lastMessageTime);
         } catch (error) {
             console.error('Error al obtener chats:', error);
             return [];
