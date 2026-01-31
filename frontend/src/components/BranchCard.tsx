@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Badge, Avatar, List, Typography, Button } from 'antd';
 import { MessageSquare, Maximize2 } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
@@ -36,6 +36,92 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
     const socket = useSocket();
     const [chats, setChats] = useState<Chat[]>([]);
     const [totalUnread, setTotalUnread] = useState(0);
+    const notificationAudioCtxRef = useRef<AudioContext | null>(null);
+    const lastNotificationKeyRef = useRef<string>('');
+    const lastNotificationAtRef = useRef<number>(0);
+
+    const playNotificationSound = (toneId: number) => {
+        try {
+            if (toneId === 11) {
+                const audio = new Audio('https://www.myinstants.com/media/sounds/sape.mp3');
+                audio.volume = 0.5;
+                audio.play().catch(() => {});
+                return;
+            }
+
+            if (!notificationAudioCtxRef.current) {
+                notificationAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            }
+            const audioCtx = notificationAudioCtxRef.current;
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
+            if (audioCtx.state !== 'running') return;
+            const now = audioCtx.currentTime;
+
+            const createOsc = (type: OscillatorType, freq: number, start: number, dur: number, vol: number = 0.1) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, start);
+                gain.gain.setValueAtTime(vol, start);
+                gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(start);
+                osc.stop(start + dur);
+            };
+
+            switch (toneId) {
+                case 1:
+                    createOsc('sine', 880, now, 0.08, 0.08);
+                    createOsc('sine', 660, now + 0.09, 0.08, 0.08);
+                    break;
+                case 2:
+                    createOsc('triangle', 1046, now, 0.06, 0.06);
+                    createOsc('triangle', 1318, now + 0.07, 0.06, 0.06);
+                    break;
+                case 3:
+                    createOsc('sine', 740, now, 0.05, 0.06);
+                    createOsc('sine', 988, now + 0.06, 0.05, 0.06);
+                    break;
+                case 4:
+                    createOsc('square', 523, now, 0.06, 0.04);
+                    createOsc('square', 659, now + 0.07, 0.06, 0.04);
+                    break;
+                case 5:
+                    createOsc('sine', 880, now, 0.06, 0.07);
+                    createOsc('sine', 1174, now + 0.07, 0.09, 0.07);
+                    break;
+                case 6:
+                    createOsc('sawtooth', 1200, now, 0.05, 0.05);
+                    createOsc('sawtooth', 900, now + 0.05, 0.05, 0.05);
+                    break;
+                case 7:
+                    createOsc('triangle', 988, now, 0.04, 0.05);
+                    createOsc('triangle', 740, now + 0.05, 0.04, 0.05);
+                    break;
+                case 8:
+                    createOsc('sine', 660, now, 0.05, 0.05);
+                    createOsc('sine', 880, now + 0.06, 0.05, 0.05);
+                    break;
+                case 9:
+                    createOsc('triangle', 880, now, 0.06, 0.06);
+                    createOsc('triangle', 1320, now + 0.07, 0.08, 0.06);
+                    break;
+                case 10:
+                    createOsc('sine', 220, now, 0.12, 0.1);
+                    break;
+                case 12: {
+                    const freqs = [1568, 1760, 1976];
+                    freqs.forEach((f, idx) => createOsc('sine', f, now + idx * 0.03, 0.03, 0.04));
+                    break;
+                }
+                default:
+                    createOsc('sine', 880, now, 0.08, 0.08);
+            }
+        } catch {}
+    };
 
     // Cargar chats
     useEffect(() => {
@@ -70,6 +156,18 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
         
         const handleNewMessage = (data: any) => {
             if (data.deviceId === device.id && !data.msg.fromMe) {
+                const tone = (() => {
+                    const saved = localStorage.getItem('notificationTone');
+                    const parsed = saved ? parseInt(saved, 10) : 1;
+                    return Number.isFinite(parsed) ? parsed : 1;
+                })();
+                const key = `${data.deviceId}:${data.chatId}:${data.msg?.id || data.msg?.timestamp || ''}`;
+                const now = Date.now();
+                if (key && key !== lastNotificationKeyRef.current && now - lastNotificationAtRef.current > 250) {
+                    lastNotificationKeyRef.current = key;
+                    lastNotificationAtRef.current = now;
+                    playNotificationSound(tone);
+                }
                 setTotalUnread(prev => prev + 1);
             }
         };
