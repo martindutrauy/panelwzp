@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button, ConfigProvider, theme } from 'antd';
 import { MessageSquare } from 'lucide-react';
 import { WhatsAppPanelModal } from './components/WhatsAppPanelModal';
@@ -8,6 +8,37 @@ import { clearAuthToken, getAuthToken } from './lib/auth';
 function App() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [authed, setAuthed] = useState(() => Boolean(getAuthToken()));
+
+    useEffect(() => {
+        const unlock = () => {
+            try {
+                const w = window as any;
+                if (!w.__wzpAudioCtx) {
+                    w.__wzpAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                }
+                const audioCtx: AudioContext = w.__wzpAudioCtx;
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume().catch(() => {});
+                }
+                if (audioCtx.state !== 'running') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                gain.gain.value = 0.00001;
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                const now = audioCtx.currentTime;
+                osc.start(now);
+                osc.stop(now + 0.01);
+            } catch {}
+        };
+
+        window.addEventListener('pointerdown', unlock, true);
+        window.addEventListener('keydown', unlock, true);
+        return () => {
+            window.removeEventListener('pointerdown', unlock, true);
+            window.removeEventListener('keydown', unlock, true);
+        };
+    }, []);
 
     if (!authed) {
         return <Login onLoggedIn={() => setAuthed(true)} />;

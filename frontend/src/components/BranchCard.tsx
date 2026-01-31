@@ -40,6 +40,18 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
     const lastNotificationKeyRef = useRef<string>('');
     const lastNotificationAtRef = useRef<number>(0);
 
+    const getAudioCtx = () => {
+        const w = window as any;
+        if (w.__wzpAudioCtx) return w.__wzpAudioCtx as AudioContext;
+        if (notificationAudioCtxRef.current) return notificationAudioCtxRef.current;
+        try {
+            notificationAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            return notificationAudioCtxRef.current;
+        } catch {
+            return null;
+        }
+    };
+
     const playNotificationSound = (toneId: number) => {
         try {
             if (toneId === 11) {
@@ -49,13 +61,8 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
                 return;
             }
 
-            if (!notificationAudioCtxRef.current) {
-                notificationAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-            }
-            const audioCtx = notificationAudioCtxRef.current;
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume().catch(() => {});
-            }
+            const audioCtx = getAudioCtx();
+            if (!audioCtx) return;
             if (audioCtx.state !== 'running') return;
             const now = audioCtx.currentTime;
 
