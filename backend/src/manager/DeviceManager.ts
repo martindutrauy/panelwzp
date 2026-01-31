@@ -98,6 +98,21 @@ function mergeChatData(store: SimpleStore, fromId: string, toId: string) {
     if (fromContact) store.contacts.delete(fromId);
 }
 
+function resolveCanonicalChatId(store: SimpleStore | undefined, chatId: string): string {
+    if (!store || !chatId) return chatId;
+    if (store.chats.has(chatId)) return chatId;
+
+    const key = chatKeyOf(chatId);
+    if (!key) return chatId;
+
+    let best = chatId;
+    for (const existingId of store.chats.keys()) {
+        if (chatKeyOf(existingId) !== key) continue;
+        best = preferredChatId(best, existingId);
+    }
+    return best;
+}
+
 interface Device {
     id: string;
     name: string;
@@ -906,9 +921,12 @@ export class DeviceManager {
         const sock = this.sessions.get(deviceId);
         if (!sock) throw new Error('Device not connected');
 
-        // NO convertir el chatId - usar tal cual viene
-        // Los LIDs son identificadores de privacidad y deben usarse directamente
-        const targetJid = chatId;
+        const store = stores.get(deviceId);
+        const canonicalChatId = resolveCanonicalChatId(store, chatId);
+        if (store && canonicalChatId !== chatId && store.chats.has(chatId)) {
+            mergeChatData(store, chatId, canonicalChatId);
+        }
+        const targetJid = canonicalChatId;
 
         console.log(`[${deviceId}] Enviando mensaje a ${targetJid}: ${text.substring(0, 50)}...`);
 
@@ -928,6 +946,12 @@ export class DeviceManager {
     public async sendMedia(deviceId: string, chatId: string, fileBuffer: Buffer, mimeType: string, caption?: string, isVoiceNote: boolean = false) {
         const sock = this.sessions.get(deviceId);
         if (!sock) throw new Error('Device not connected');
+
+        const store = stores.get(deviceId);
+        const canonicalChatId = resolveCanonicalChatId(store, chatId);
+        if (store && canonicalChatId !== chatId && store.chats.has(chatId)) {
+            mergeChatData(store, chatId, canonicalChatId);
+        }
 
         let messageContent: any;
 
@@ -987,10 +1011,10 @@ export class DeviceManager {
             throw new Error(`Tipo de archivo no soportado: ${mimeType}`);
         }
 
-        this.rememberPanelSend(deviceId, chatId, { timestamp: Date.now() });
-        const result = await sock.sendMessage(chatId, messageContent);
+        this.rememberPanelSend(deviceId, canonicalChatId, { timestamp: Date.now() });
+        const result = await sock.sendMessage(canonicalChatId, messageContent);
         const msgId = result?.key?.id as string | undefined;
-        if (msgId) this.rememberPanelSend(deviceId, chatId, { id: msgId, timestamp: Date.now() });
+        if (msgId) this.rememberPanelSend(deviceId, canonicalChatId, { id: msgId, timestamp: Date.now() });
         return result;
     }
 

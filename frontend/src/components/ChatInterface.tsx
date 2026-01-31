@@ -396,6 +396,9 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                 const incomingKey = getChatKey(data.chatId);
                 const activeKey = getChatKey(activeChat);
                 if (incomingKey && activeKey && incomingKey === activeKey) {
+                    if (activeChat && data.chatId && data.chatId !== activeChat) {
+                        setActiveChat(data.chatId);
+                    }
                     setMessages(prev => {
                         const isDuplicate = prev.some(m => m.id === data.msg.id);
                         if (isDuplicate) return prev; // Evitar duplicados
@@ -413,7 +416,7 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                     if (existingChat) {
                         // Actualizar chat existente y moverlo al principio
                         return [
-                            { ...existingChat, lastMessageTime: data.msg.timestamp },
+                            { ...existingChat, id: data.chatId, lastMessageTime: data.msg.timestamp },
                             ...prev.filter(c => getChatKey(c.id) !== incomingKey)
                         ];
                     } else {
