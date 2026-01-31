@@ -1,7 +1,7 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import multer from 'multer';
 import { DeviceManager } from './manager/DeviceManager';
 import { TemplateManager } from './manager/TemplateManager';
@@ -13,10 +13,29 @@ import { DB_ROOT } from './config/paths';
 import { ensureDir } from './config/ensureDir';
 import { changePassword, signAuthToken, verifyAuthToken, verifyCredentials } from './auth/appAuth';
 
+const parseAllowedOrigins = (): string[] | '*' | null => {
+    const raw = String(process.env.APP_CORS_ORIGINS || '').trim();
+    if (!raw) return null;
+    if (raw === '*') return '*';
+    const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    return Array.from(new Set(parts));
+};
+
+const allowedOrigins = parseAllowedOrigins();
+const corsOptions: CorsOptions = allowedOrigins === '*' || !allowedOrigins
+    ? { origin: '*' }
+    : {
+        origin: (origin, cb) => {
+            if (!origin) return cb(null, true);
+            if ((allowedOrigins as string[]).includes(origin)) return cb(null, true);
+            return cb(new Error('CORS_NOT_ALLOWED'), false);
+        }
+    };
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: '*' }
+    cors: { origin: allowedOrigins === '*' || !allowedOrigins ? '*' : allowedOrigins }
 });
 
 const deviceManager = DeviceManager.getInstance();
@@ -30,7 +49,7 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 } // 100 MB máximo
 });
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 ensureDir(DB_ROOT);
 app.use('/storage', express.static(path.join(DB_ROOT, 'storage')));

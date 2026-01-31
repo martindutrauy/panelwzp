@@ -41,10 +41,61 @@ function createSimpleStore(): SimpleStore {
 
 function chatKeyOf(chatId: string): string {
     if (!chatId) return chatId;
-    if (chatId.includes('@lid')) return chatId;
     if (chatId.endsWith('@g.us')) return chatId;
     const prefix = chatId.split('@')[0] || chatId;
     return prefix.split(':')[0] || prefix;
+}
+
+function hasDeviceSuffix(chatId: string): boolean {
+    const prefix = chatId.split('@')[0] || chatId;
+    return prefix.includes(':');
+}
+
+function preferredChatId(a: string, b: string): string {
+    if (!a) return b;
+    if (!b) return a;
+    if (a.endsWith('@g.us') || b.endsWith('@g.us')) return a.endsWith('@g.us') ? a : b;
+    const aHas = hasDeviceSuffix(a);
+    const bHas = hasDeviceSuffix(b);
+    if (aHas !== bHas) return aHas ? b : a;
+    return a.length <= b.length ? a : b;
+}
+
+function mergeChatData(store: SimpleStore, fromId: string, toId: string) {
+    if (!fromId || !toId || fromId === toId) return;
+
+    const fromChat = store.chats.get(fromId);
+    const toChat = store.chats.get(toId);
+    if (fromChat) {
+        if (!toChat) {
+            store.chats.set(toId, { ...fromChat, id: toId });
+        } else {
+            const merged = { ...toChat };
+            const fromTs = Number(fromChat?.conversationTimestamp || 0);
+            const toTs = Number(toChat?.conversationTimestamp || 0);
+            merged.conversationTimestamp = Math.max(fromTs, toTs);
+            const fromUnread = Number(fromChat?.unreadCount || 0);
+            const toUnread = Number(toChat?.unreadCount || 0);
+            merged.unreadCount = (Number.isFinite(fromUnread) ? fromUnread : 0) + (Number.isFinite(toUnread) ? toUnread : 0);
+            if (fromChat?.name && !toChat?.name) merged.name = fromChat.name;
+            store.chats.set(toId, merged);
+        }
+        store.chats.delete(fromId);
+    }
+
+    const fromMsgs = store.messages.get(fromId);
+    if (fromMsgs && fromMsgs.length) {
+        const toMsgs = store.messages.get(toId) || [];
+        const mergedMsgs = toMsgs.concat(fromMsgs);
+        mergedMsgs.sort((x: any, y: any) => Number(x?.timestamp || 0) - Number(y?.timestamp || 0));
+        store.messages.set(toId, mergedMsgs);
+        store.messages.delete(fromId);
+    }
+
+    const fromContact = store.contacts.get(fromId);
+    const toContact = store.contacts.get(toId);
+    if (fromContact && !toContact) store.contacts.set(toId, fromContact);
+    if (fromContact) store.contacts.delete(fromId);
 }
 
 interface Device {
@@ -552,9 +603,13 @@ export class DeviceManager {
                     for (const existingChatId of store.chats.keys()) {
                         const existingKey = chatKeyOf(existingChatId);
                         if (existingKey === chatKey && existingChatId !== chatId) {
-                            // Ya existe un chat con el mismo número, usar el existente
-                            unifiedChatId = existingChatId;
-                            console.log(`[${deviceId}] Unificando chat: ${chatId} -> ${unifiedChatId}`);
+                            const preferred = preferredChatId(existingChatId, chatId);
+                            unifiedChatId = preferred;
+                            if (preferred === existingChatId) {
+                                mergeChatData(store, chatId, existingChatId);
+                            } else {
+                                mergeChatData(store, existingChatId, chatId);
+                            }
                             break;
                         }
                     }

@@ -96,7 +96,6 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
 
     const getChatKey = (chatId: string | null | undefined) => {
         if (!chatId) return '';
-        if (chatId.includes('@lid')) return chatId;
         if (chatId.includes('@g.us')) return chatId;
         const prefix = chatId.split('@')[0] || chatId;
         return prefix.split(':')[0] || prefix;
