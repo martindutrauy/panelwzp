@@ -29,6 +29,7 @@ interface SimpleStore {
     contacts: Map<string, string>; // jid -> nombre
     canonicalByKey: Map<string, string>;
     aliases: Map<string, string>;
+    profilePhotos: Map<string, { url: string; updatedAt: number }>;
 }
 
 const stores: Map<string, SimpleStore> = new Map();
@@ -39,7 +40,8 @@ function createSimpleStore(): SimpleStore {
         messages: new Map(),
         contacts: new Map(),
         canonicalByKey: new Map(),
-        aliases: new Map()
+        aliases: new Map(),
+        profilePhotos: new Map()
     };
 }
 
@@ -1198,6 +1200,47 @@ export class DeviceManager {
 
     // ========== CHAT MANAGEMENT ==========
 
+    public async importChatProfilePhoto(deviceId: string, chatId: string) {
+        const sock = this.sessions.get(deviceId);
+        if (!sock) throw new Error('Device not connected');
+
+        const store = stores.get(deviceId);
+        if (!store) throw new Error('Store no encontrado');
+
+        const canonicalId = resolveCanonicalChatId(store, chatId);
+        if (!canonicalId) throw new Error('Chat inválido');
+
+        const key = chatKeyOf(canonicalId);
+        const fileName = `${crypto.createHash('sha1').update(key).digest('hex')}.jpg`;
+        const dir = path.join(DB_ROOT, 'storage', 'avatars', deviceId);
+        ensureDir(dir);
+        const filePath = path.join(dir, fileName);
+        const urlPath = `/storage/avatars/${encodeURIComponent(deviceId)}/${fileName}`;
+
+        const existing = store.profilePhotos.get(canonicalId);
+        if (existing && fs.existsSync(filePath)) {
+            return { success: true, chatId: canonicalId, url: existing.url };
+        }
+
+        const profileUrl = typeof (sock as any).profilePictureUrl === 'function'
+            ? await (sock as any).profilePictureUrl(canonicalId, 'image').catch(() => null)
+            : null;
+
+        if (!profileUrl) {
+            store.profilePhotos.delete(canonicalId);
+            return { success: false, chatId: canonicalId, error: 'Sin foto de perfil' };
+        }
+
+        const resp = await fetch(profileUrl);
+        if (!resp.ok) throw new Error(`Error descargando foto: HTTP ${resp.status}`);
+        const arr = await resp.arrayBuffer();
+        const buf = Buffer.from(arr);
+        fs.writeFileSync(filePath, buf);
+
+        store.profilePhotos.set(canonicalId, { url: urlPath, updatedAt: Date.now() });
+        return { success: true, chatId: canonicalId, url: urlPath };
+    }
+
     public async getChats(deviceId: string) {
         const sock = this.sessions.get(deviceId);
         if (!sock) throw new Error('Device not connected');
@@ -1243,12 +1286,14 @@ export class DeviceManager {
 
                 const displayName = String(contactName || '').trim() || canonicalId.split('@')[0];
                 const lastMessageTime = entry.lastMessageTime || Date.now();
+                const profilePhotoUrl = store.profilePhotos.get(canonicalId)?.url || null;
                 return {
                     id: canonicalId,
                     name: displayName,
                     lastMessageTime,
                     unreadCount: entry.unreadCount || 0,
-                    isGroup: canonicalId.endsWith('@g.us')
+                    isGroup: canonicalId.endsWith('@g.us'),
+                    profilePhotoUrl
                 };
             });
 

@@ -190,6 +190,15 @@ app.get('/api/devices/:id/chats/:chatId/messages', async (req, res) => {
     }
 });
 
+app.post('/api/devices/:id/chats/:chatId/import-profile-photo', async (req, res) => {
+    try {
+        const result = await deviceManager.importChatProfilePhoto(req.params.id, req.params.chatId);
+        res.json(result);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Buscar mensajes
 app.get('/api/devices/:id/messages/search', async (req, res) => {
     try {

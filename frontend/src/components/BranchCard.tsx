@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Badge, Avatar, List, Typography, Button } from 'antd';
 import { MessageSquare, Maximize2 } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
-import { apiFetch } from '../lib/runtime';
+import { apiFetch, assetUrl } from '../lib/runtime';
 
 const { Text } = Typography;
 
@@ -20,6 +20,7 @@ interface Chat {
     lastMessageTime: number;
     unreadCount: number;
     isGroup: boolean;
+    profilePhotoUrl?: string | null;
 }
 
 interface BranchCardProps {
@@ -318,7 +319,7 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
                                 background: 'transparent'
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                                    <Avatar size="small" style={{ backgroundColor: chat.isGroup ? '#25D366' : '#6a7175', flexShrink: 0 }}>
+                                    <Avatar size="small" shape="square" src={chat.profilePhotoUrl ? assetUrl(chat.profilePhotoUrl) : undefined} style={{ backgroundColor: chat.isGroup ? '#25D366' : '#6a7175', flexShrink: 0 }}>
                                         {chat.name.substring(0, 1).toUpperCase()}
                                     </Avatar>
                                     <div style={{ flex: 1, overflow: 'hidden' }}>
