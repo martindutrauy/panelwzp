@@ -208,6 +208,22 @@ app.post('/api/devices/:id/import-messages', async (req, res) => {
     }
 });
 
+app.get('/api/devices/:id/import-messages/status', (req, res) => {
+    try {
+        res.json(deviceManager.getImportMessagesStatus(req.params.id));
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/devices/:id/import-messages/stop', (req, res) => {
+    try {
+        res.json(deviceManager.stopImportMessages(req.params.id));
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Importar mensajes desde el dispositivo (solo si el chat está vacío en el panel)
 app.post('/api/devices/:id/chats/:chatId/import-messages', async (req, res) => {
     try {
