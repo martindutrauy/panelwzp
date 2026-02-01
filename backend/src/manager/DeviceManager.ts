@@ -753,11 +753,15 @@ export class DeviceManager {
             null;
         if (text) return text;
 
+        const sticker = m?.stickerMessage;
+        if (sticker) return 'Sticker';
+
         const normalizePhone = (raw: string) => {
             const s = String(raw || '').trim();
             if (!s) return '';
             const hasPlus = s.startsWith('+');
-            const digits = s.replace(/[^\d]/g, '');
+            const cleaned = s.replace(/^tel:/i, '').trim();
+            const digits = cleaned.replace(/[^\d]/g, '');
             if (!digits) return '';
             return hasPlus ? `+${digits}` : digits;
         };
@@ -786,10 +790,24 @@ export class DeviceManager {
                     }
                     continue;
                 }
-                if (key.startsWith('TEL')) {
-                    const phone = normalizePhone(value);
-                    if (!phone) continue;
-                    if (!phones.includes(phone)) phones.push(phone);
+                const isTel = /(^|[.;])TEL($|;)/.test(key) || key.startsWith('TEL');
+                if (!isTel) continue;
+
+                const phoneFromValue = normalizePhone(value);
+                if (phoneFromValue && !phones.includes(phoneFromValue)) phones.push(phoneFromValue);
+
+                const waidMatch = key.match(/WAID=([0-9]+)/i);
+                if (waidMatch?.[1]) {
+                    const waidPhone = normalizePhone(`+${waidMatch[1]}`);
+                    if (waidPhone && !phones.includes(waidPhone)) phones.push(waidPhone);
+                }
+            }
+
+            if (phones.length === 0) {
+                const waidMatch = v.match(/WAID=([0-9]+)/i);
+                if (waidMatch?.[1]) {
+                    const waidPhone = normalizePhone(`+${waidMatch[1]}`);
+                    if (waidPhone) phones.push(waidPhone);
                 }
             }
             return { name: String(name || '').trim(), phones };
@@ -943,7 +961,7 @@ export class DeviceManager {
 
     private async handleMedia(deviceId: string, msg: any) {
         const messageType = Object.keys(msg.message || {})[0];
-        if (!['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'].includes(messageType || '')) return null;
+        if (!['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].includes(messageType || '')) return null;
 
         try {
             const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: (sock: any) => sock.updateMediaMessage(msg) });
@@ -951,7 +969,7 @@ export class DeviceManager {
             const dir = path.join(this.storageRoot, deviceId, chatId_sanitized);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-            const rawMime = String(msg.message[messageType!].mimetype || '');
+            const rawMime = String(msg.message[messageType!].mimetype || (messageType === 'stickerMessage' ? 'image/webp' : ''));
             const cleanMime = (rawMime.split(';')[0] ?? '').trim();
             const rawExt = cleanMime.split('/')[1] || 'bin';
             const ext = rawExt.replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 16) || 'bin';
@@ -970,7 +988,7 @@ export class DeviceManager {
                 fileName,
                 path: filePath,
                 url,
-                mimeType: msg.message[messageType!].mimetype,
+                mimeType: cleanMime || msg.message[messageType!].mimetype,
                 size: buffer.length,
                 timestamp: Date.now()
             };
@@ -1286,7 +1304,10 @@ export class DeviceManager {
 
                 const mediaMetadata = await this.handleMedia(deviceId, msg);
 
-                const text = this.extractDisplayText(msg);
+                let text = this.extractDisplayText(msg);
+                if (msgType === 'stickerMessage') {
+                    text = mediaMetadata ? null : (text || 'Sticker');
+                }
 
                 const locationMessage = (msg.message as any)?.locationMessage || (msg.message as any)?.liveLocationMessage || null;
                 const location = locationMessage
