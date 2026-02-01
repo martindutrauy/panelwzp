@@ -760,24 +760,59 @@ export class DeviceManager {
             return 0;
         };
 
-        const fromOngoing = await waitForMessages(2000);
-        if (fromOngoing > 0) {
-            return { success: true, chatId: canonicalId, imported: fromOngoing - before };
+        const waitForGrowth = async (prevLen: number, timeoutMs: number) => {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                const cur = store.messages.get(canonicalId) || [];
+                if (cur.length > prevLen) return cur.length;
+                await new Promise((r) => setTimeout(r, 300));
+            }
+            return store.messages.get(canonicalId)?.length || prevLen;
+        };
+
+        await waitForMessages(2000);
+
+        let currentLen = store.messages.get(canonicalId)?.length || 0;
+        if (currentLen === 0) {
+            try {
+                await sock.fetchMessageHistory(
+                    50,
+                    { remoteJid: canonicalId, fromMe: false, id: '0' } as any,
+                    0 as any
+                );
+            } catch (e: any) {
+                const after0 = store.messages.get(canonicalId)?.length || 0;
+                return { success: after0 > 0, chatId: canonicalId, imported: Math.max(0, after0 - before), error: String(e?.message || 'No se pudo solicitar historial') };
+            }
+            currentLen = await waitForGrowth(0, 8000);
         }
 
-        try {
-            await sock.fetchMessageHistory(
-                50,
-                { remoteJid: canonicalId, fromMe: false, id: '0' } as any,
-                0 as any
-            );
-        } catch (e: any) {
-            const after0 = store.messages.get(canonicalId)?.length || 0;
-            return { success: after0 > 0, chatId: canonicalId, imported: Math.max(0, after0 - before), error: String(e?.message || 'No se pudo solicitar historial') };
+        const maxPages = 30;
+        for (let page = 0; page < maxPages; page++) {
+            const arr = store.messages.get(canonicalId) || [];
+            if (!arr.length) break;
+            arr.sort((a: any, b: any) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
+            const oldest = arr[0];
+            const oldestKey = oldest?.key;
+            if (!oldestKey?.id || !oldestKey?.remoteJid) break;
+            const oldestTs =
+                oldest?.messageTimestamp != null
+                    ? Number(oldest.messageTimestamp)
+                    : oldest?.timestamp
+                      ? Math.floor(Number(oldest.timestamp) / 1000)
+                      : 0;
+            const beforeLen = arr.length;
+            try {
+                await sock.fetchMessageHistory(50, oldestKey as any, oldestTs as any);
+            } catch {
+                break;
+            }
+            const afterLen = await waitForGrowth(beforeLen, 8000);
+            if (afterLen <= beforeLen) break;
         }
 
-        const after = await waitForMessages(8000);
-        return { success: after > 0, chatId: canonicalId, imported: Math.max(0, after - before) };
+        const finalLen = store.messages.get(canonicalId)?.length || 0;
+        return { success: finalLen > 0, chatId: canonicalId, imported: Math.max(0, finalLen - before) };
     }
 
     public async initDevice(deviceId: string, mode?: 'qr' | 'code') {
