@@ -2073,7 +2073,13 @@ export class DeviceManager {
 
                 return {
                     id: msg.key?.id || msg.id,
-                    text: msg.text || this.extractDisplayText(msg) || (location ? null : (msg.media ? null : '[Media]')),
+                    text: (() => {
+                        const computed = this.extractDisplayText(msg);
+                        const hasContact = Boolean(msg?.message?.contactMessage || msg?.message?.contactsArrayMessage);
+                        const hasSticker = Boolean(msg?.message?.stickerMessage);
+                        if (hasContact || hasSticker) return computed || msg.text || (location ? null : (msg.media ? null : '[Media]'));
+                        return msg.text || computed || (location ? null : (msg.media ? null : '[Media]'));
+                    })(),
                     fromMe: msg.fromMe ?? msg.key?.fromMe,
                     timestamp: msg.timestamp || (msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
                     source: msg.source || ((msg.fromMe ?? msg.key?.fromMe) ? 'phone' : 'contact'),
