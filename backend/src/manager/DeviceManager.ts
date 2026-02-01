@@ -235,26 +235,6 @@ interface FileMetadata {
     timestamp: number;
 }
 
-type ImportJobStatus = 'idle' | 'running' | 'done' | 'error' | 'stopped';
-type ImportJobPhase = 'starting' | 'reconnecting' | 'syncing' | 'backfilling' | 'done';
-
-type ImportJobState = {
-    deviceId: string;
-    status: ImportJobStatus;
-    phase: ImportJobPhase;
-    startedAt: number | null;
-    updatedAt: number;
-    totalMessages: number;
-    chatsWithMessages: number;
-    progress: number | null;
-    isLatest: boolean | null;
-    error: string | null;
-    stopRequested: boolean;
-    currentChatId: string | null;
-    chatsProcessed: number;
-    chatsTotal: number;
-};
-
 export class DeviceManager {
     private static instance: DeviceManager;
     private sessions: Map<string, any> = new Map();
@@ -270,12 +250,6 @@ export class DeviceManager {
     private pairingCodeLastAt: Map<string, number> = new Map();
     private avatarFetchInFlight: Map<string, Set<string>> = new Map();
     private avatarFetchLastAt: Map<string, number> = new Map();
-    private forceFullHistorySync: Set<string> = new Set();
-    private importInProgress: Set<string> = new Set();
-    private lastHistorySetAt: Map<string, number> = new Map();
-    private historySyncProgress: Map<string, number | null> = new Map();
-    private historySyncIsLatest: Map<string, boolean> = new Map();
-    private importJobs: Map<string, ImportJobState> = new Map();
     private messageRetentionDays = 90;
 
     private constructor() {
@@ -283,41 +257,6 @@ export class DeviceManager {
         ensureDir(this.storageRoot);
         this.loadData();
         this.initRetentionJob();
-    }
-
-    private ensureImportJob(deviceId: string): ImportJobState {
-        const existing = this.importJobs.get(deviceId);
-        if (existing) return existing;
-        const state: ImportJobState = {
-            deviceId,
-            status: 'idle',
-            phase: 'starting',
-            startedAt: null,
-            updatedAt: Date.now(),
-            totalMessages: 0,
-            chatsWithMessages: 0,
-            progress: null,
-            isLatest: null,
-            error: null,
-            stopRequested: false,
-            currentChatId: null,
-            chatsProcessed: 0,
-            chatsTotal: 0
-        };
-        this.importJobs.set(deviceId, state);
-        return state;
-    }
-
-    private updateImportJobFromStore(deviceId: string) {
-        const job = this.importJobs.get(deviceId);
-        if (!job) return;
-        const summary = this.getMessageSummary(deviceId);
-        job.totalMessages = summary.totalMessages;
-        job.chatsWithMessages = summary.chatsWithMessages;
-        job.progress = this.historySyncProgress.get(deviceId) ?? null;
-        job.isLatest = this.historySyncIsLatest.get(deviceId) ?? null;
-        job.updatedAt = Date.now();
-        this.importJobs.set(deviceId, job);
     }
 
     private clearConnectWatchdog(deviceId: string) {
@@ -715,7 +654,6 @@ export class DeviceManager {
         const now = Date.now();
         for (const deviceId of stores.keys()) {
             this.pruneOldMessages(deviceId, now);
-            this.updateImportJobFromStore(deviceId);
         }
     }
 
@@ -856,359 +794,6 @@ export class DeviceManager {
         }
     }
 
-    public async importChatMessagesFromDevice(deviceId: string, chatId: string) {
-        const sock = this.sessions.get(deviceId);
-        if (!sock) throw Object.assign(new Error('Device not connected'), { status: 400 });
-
-        const store = stores.get(deviceId);
-        if (!store) throw Object.assign(new Error('Store no encontrado'), { status: 500 });
-
-        const canonicalId = resolveCanonicalChatId(store, chatId);
-        const lockKey = `${deviceId}:${canonicalId}`;
-        if (this.importInProgress.has(lockKey)) throw Object.assign(new Error('Importación en curso'), { status: 409 });
-        this.importInProgress.add(lockKey);
-        try {
-            const existing = store.messages.get(canonicalId) || [];
-            if (existing.length > 0) {
-                throw Object.assign(new Error('El chat no está vacío'), { status: 409 });
-            }
-
-            const before = existing.length;
-
-            const waitForMessages = async (timeoutMs: number) => {
-                const start = Date.now();
-                while (Date.now() - start < timeoutMs) {
-                    const cur = store.messages.get(canonicalId) || [];
-                    if (cur.length > 0) return cur.length;
-                    await new Promise((r) => setTimeout(r, 300));
-                }
-                return 0;
-            };
-
-            const waitForGrowth = async (prevLen: number, timeoutMs: number) => {
-                const start = Date.now();
-                while (Date.now() - start < timeoutMs) {
-                    const cur = store.messages.get(canonicalId) || [];
-                    if (cur.length > prevLen) return cur.length;
-                    await new Promise((r) => setTimeout(r, 300));
-                }
-                return store.messages.get(canonicalId)?.length || prevLen;
-            };
-
-            const tryForceReconnect = async () => {
-                this.forceFullHistorySync.add(deviceId);
-                try {
-                    if (typeof sock?.end === 'function') sock.end(new Error('FORCE_FULL_SYNC'));
-                    else if (sock?.ws?.close) sock.ws.close();
-                } catch {}
-                const start = Date.now();
-                while (Date.now() - start < 30000) {
-                    const cur = store.messages.get(canonicalId) || [];
-                    if (cur.length > 0) return cur.length;
-                    await new Promise((r) => setTimeout(r, 400));
-                }
-                return store.messages.get(canonicalId)?.length || 0;
-            };
-
-            await waitForMessages(2000);
-
-            let currentLen = store.messages.get(canonicalId)?.length || 0;
-            if (currentLen === 0) {
-                try {
-                    await sock.fetchMessageHistory(
-                        50,
-                        { remoteJid: canonicalId, fromMe: false, id: '0' } as any,
-                        0 as any
-                    );
-                } catch (e: any) {
-                    const after0 = store.messages.get(canonicalId)?.length || 0;
-                    const success = after0 > 0;
-                    return { success, chatId: canonicalId, imported: Math.max(0, after0 - before), error: String(e?.message || 'No se pudo solicitar historial') };
-                }
-                currentLen = await waitForGrowth(0, 8000);
-            }
-
-            if (currentLen === 0) {
-                currentLen = await tryForceReconnect();
-            }
-
-            const maxPages = 30;
-            for (let page = 0; page < maxPages; page++) {
-                const arr = store.messages.get(canonicalId) || [];
-                if (!arr.length) break;
-                arr.sort((a: any, b: any) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
-                const oldest = arr[0];
-                const oldestKey = oldest?.key;
-                if (!oldestKey?.id || !oldestKey?.remoteJid) break;
-                const oldestTs =
-                    oldest?.messageTimestamp != null
-                        ? Number(oldest.messageTimestamp)
-                        : oldest?.timestamp
-                          ? Math.floor(Number(oldest.timestamp) / 1000)
-                          : 0;
-                const beforeLen = arr.length;
-                try {
-                    await sock.fetchMessageHistory(50, oldestKey as any, oldestTs as any);
-                } catch {
-                    break;
-                }
-                const afterLen = await waitForGrowth(beforeLen, 8000);
-                if (afterLen <= beforeLen) break;
-            }
-
-            const finalLen = store.messages.get(canonicalId)?.length || 0;
-            return { success: finalLen > 0, chatId: canonicalId, imported: Math.max(0, finalLen - before) };
-        } finally {
-            this.importInProgress.delete(lockKey);
-        }
-    }
-
-    public getMessageSummary(deviceId: string) {
-        const store = stores.get(deviceId);
-        if (!store) return { totalMessages: 0, chatsWithMessages: 0 };
-        this.pruneOldMessages(deviceId);
-        let totalMessages = 0;
-        let chatsWithMessages = 0;
-        for (const msgs of store.messages.values()) {
-            const len = Array.isArray(msgs) ? msgs.length : 0;
-            totalMessages += len;
-            if (len > 0) chatsWithMessages += 1;
-        }
-        return { totalMessages, chatsWithMessages };
-    }
-
-    public getImportMessagesStatus(deviceId: string) {
-        const job = this.ensureImportJob(deviceId);
-        this.updateImportJobFromStore(deviceId);
-        return this.importJobs.get(deviceId) || job;
-    }
-
-    public stopImportMessages(deviceId: string) {
-        const job = this.ensureImportJob(deviceId);
-        job.stopRequested = true;
-        job.updatedAt = Date.now();
-        this.importJobs.set(deviceId, job);
-        return job;
-    }
-
-    private async backfillChatAll(deviceId: string, chatId: string, job: ImportJobState) {
-        const store = stores.get(deviceId);
-        if (!store) return;
-
-        const canonicalId = resolveCanonicalChatId(store, chatId);
-        job.currentChatId = canonicalId;
-        job.updatedAt = Date.now();
-        this.importJobs.set(deviceId, job);
-
-        const waitForGrowth = async (prevLen: number, timeoutMs: number) => {
-            const start = Date.now();
-            while (Date.now() - start < timeoutMs) {
-                if (job.stopRequested) return prevLen;
-                const cur = store.messages.get(canonicalId) || [];
-                if (cur.length > prevLen) return cur.length;
-                await new Promise((r) => setTimeout(r, 400));
-            }
-            return store.messages.get(canonicalId)?.length || prevLen;
-        };
-
-        const maxPages = 500;
-        for (let page = 0; page < maxPages; page++) {
-            if (job.stopRequested) return;
-            const sock = this.sessions.get(deviceId);
-            if (!sock) return;
-
-            const arr = store.messages.get(canonicalId) || [];
-            if (!arr.length) return;
-            arr.sort((a: any, b: any) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
-            const oldest = arr[0];
-            const oldestKey = oldest?.key;
-            if (!oldestKey?.id || !oldestKey?.remoteJid) return;
-            const oldestTs =
-                oldest?.messageTimestamp != null
-                    ? Number(oldest.messageTimestamp)
-                    : oldest?.timestamp
-                      ? Math.floor(Number(oldest.timestamp) / 1000)
-                      : 0;
-            const beforeLen = arr.length;
-            try {
-                await sock.fetchMessageHistory(50, oldestKey as any, oldestTs as any);
-            } catch {
-                return;
-            }
-            const afterLen = await waitForGrowth(beforeLen, 12000);
-            this.updateImportJobFromStore(deviceId);
-            if (afterLen <= beforeLen) return;
-            await new Promise((r) => setTimeout(r, 250));
-        }
-    }
-
-    private async runImportAllJob(deviceId: string) {
-        const job = this.ensureImportJob(deviceId);
-        job.status = 'running';
-        job.phase = 'starting';
-        job.startedAt = Date.now();
-        job.error = null;
-        job.stopRequested = false;
-        job.currentChatId = null;
-        job.chatsProcessed = 0;
-        job.chatsTotal = 0;
-        job.updatedAt = Date.now();
-        this.importJobs.set(deviceId, job);
-
-        const lockKey = `${deviceId}:ALL`;
-        if (this.importInProgress.has(lockKey)) return;
-        this.importInProgress.add(lockKey);
-        try {
-            const store = stores.get(deviceId);
-            if (!store) throw new Error('Store no encontrado');
-            const sock = this.sessions.get(deviceId);
-            if (!sock) throw new Error('Device not connected');
-
-            const summary = this.getMessageSummary(deviceId);
-            if (summary.totalMessages > 0) throw Object.assign(new Error('El dispositivo ya tiene mensajes importados'), { status: 409 });
-
-            const oldSock = sock;
-            const previousHistoryAt = this.lastHistorySetAt.get(deviceId) || 0;
-            this.historySyncIsLatest.set(deviceId, false);
-            this.historySyncProgress.set(deviceId, null);
-            job.progress = null;
-            job.isLatest = null;
-
-            job.phase = 'reconnecting';
-            job.updatedAt = Date.now();
-            this.importJobs.set(deviceId, job);
-
-            this.forceFullHistorySync.add(deviceId);
-            try {
-                if (typeof oldSock?.end === 'function') oldSock.end(new Error('FORCE_FULL_SYNC'));
-                else if (oldSock?.ws?.close) oldSock.ws.close();
-            } catch {}
-
-            const waitUntil = async (predicate: () => boolean, timeoutMs: number, pollMs: number) => {
-                const start = Date.now();
-                while (Date.now() - start < timeoutMs) {
-                    if (job.stopRequested) return false;
-                    if (predicate()) return true;
-                    await new Promise((r) => setTimeout(r, pollMs));
-                }
-                return false;
-            };
-
-            const reconnected = await waitUntil(() => {
-                const current = this.sessions.get(deviceId);
-                return Boolean(current && current !== oldSock);
-            }, 120000, 700);
-            if (!reconnected) throw new Error('No se pudo reconectar el dispositivo para sincronizar historial');
-
-            job.phase = 'syncing';
-            job.updatedAt = Date.now();
-            this.importJobs.set(deviceId, job);
-
-            const started = await waitUntil(() => {
-                const lastAt = this.lastHistorySetAt.get(deviceId) || 0;
-                if (lastAt > previousHistoryAt) return true;
-                const cur = this.getMessageSummary(deviceId);
-                return cur.totalMessages > 0;
-            }, 180000, 700);
-            if (!started) throw new Error('No se recibió historial del dispositivo');
-
-            const syncStart = Date.now();
-            let lastChangeAt = Date.now();
-            let lastCount = this.getMessageSummary(deviceId).totalMessages;
-            while (Date.now() - syncStart < 600000) {
-                if (job.stopRequested) break;
-                const latest = this.historySyncIsLatest.get(deviceId) === true;
-                const progress = this.historySyncProgress.get(deviceId);
-                const curCount = this.getMessageSummary(deviceId).totalMessages;
-                if (curCount !== lastCount) {
-                    lastCount = curCount;
-                    lastChangeAt = Date.now();
-                }
-                this.updateImportJobFromStore(deviceId);
-                if (latest) break;
-                if (typeof progress === 'number' && progress >= 1) break;
-                if (Date.now() - lastChangeAt > 20000) break;
-                await new Promise((r) => setTimeout(r, 1000));
-            }
-
-            if (job.stopRequested) {
-                job.status = 'stopped';
-                job.phase = 'done';
-                job.updatedAt = Date.now();
-                this.updateImportJobFromStore(deviceId);
-                this.importJobs.set(deviceId, job);
-                return;
-            }
-
-            job.phase = 'backfilling';
-            job.updatedAt = Date.now();
-            this.importJobs.set(deviceId, job);
-
-            const chatIds = Array.from(store.messages.keys());
-            job.chatsTotal = chatIds.length;
-            job.chatsProcessed = 0;
-            job.currentChatId = null;
-            job.updatedAt = Date.now();
-            this.importJobs.set(deviceId, job);
-
-            for (const cid of chatIds) {
-                if (job.stopRequested) break;
-                await this.backfillChatAll(deviceId, cid, job);
-                job.chatsProcessed += 1;
-                job.updatedAt = Date.now();
-                this.updateImportJobFromStore(deviceId);
-                this.importJobs.set(deviceId, job);
-            }
-
-            if (job.stopRequested) {
-                job.status = 'stopped';
-            } else {
-                job.status = 'done';
-            }
-            job.phase = 'done';
-            job.currentChatId = null;
-            job.updatedAt = Date.now();
-            this.updateImportJobFromStore(deviceId);
-            this.importJobs.set(deviceId, job);
-        } catch (e: any) {
-            const job = this.ensureImportJob(deviceId);
-            job.status = 'error';
-            job.phase = 'done';
-            job.error = String(e?.message || 'Error importando mensajes');
-            job.updatedAt = Date.now();
-            this.updateImportJobFromStore(deviceId);
-            this.importJobs.set(deviceId, job);
-        } finally {
-            this.importInProgress.delete(lockKey);
-        }
-    }
-
-    public startImportMessages(deviceId: string) {
-        const job = this.ensureImportJob(deviceId);
-        if (job.status === 'running') return job;
-
-        const summary = this.getMessageSummary(deviceId);
-        if (summary.totalMessages > 0) throw Object.assign(new Error('El dispositivo ya tiene mensajes importados'), { status: 409 });
-
-        job.status = 'running';
-        job.phase = 'starting';
-        job.startedAt = Date.now();
-        job.updatedAt = Date.now();
-        job.error = null;
-        job.stopRequested = false;
-        job.currentChatId = null;
-        job.chatsProcessed = 0;
-        job.chatsTotal = 0;
-        this.importJobs.set(deviceId, job);
-
-        void this.runImportAllJob(deviceId);
-        return job;
-    }
-
-    public async importDeviceMessagesFromDevice(deviceId: string) {
-        return this.startImportMessages(deviceId);
-    }
-
     public async initDevice(deviceId: string, mode?: 'qr' | 'code') {
         const existingDevice = this.devices.find(d => d.id === deviceId);
         if (!existingDevice) throw new Error('Dispositivo no encontrado');
@@ -1230,13 +815,10 @@ export class DeviceManager {
         stores.set(deviceId, store);
 
         const currentMode = this.pairingMode.get(deviceId) || mode || 'qr';
-        const forceFullSync = this.forceFullHistorySync.has(deviceId);
-
-        const browser = forceFullSync
-            ? ["Windows", "Desktop", "10"]
-            : currentMode === 'code'
-              ? ["Chrome (Windows)", "Chrome", "131.0.0.0"]
-              : ["Panel Multi-Dispositivo", "Chrome", "1.0.0"];
+        
+        const browser = currentMode === 'code'
+            ? ["Chrome (Windows)", "Chrome", "131.0.0.0"]
+            : ["Panel Multi-Dispositivo", "Chrome", "1.0.0"];
 
         const sock = makeWASocket({
             version,
@@ -1255,7 +837,6 @@ export class DeviceManager {
             // Evitar marcas de online prematuras
             markOnlineOnConnect: false,
             generateHighQualityLinkPreview: true,
-            ...(forceFullSync ? { syncFullHistory: true, shouldSyncHistoryMessage: () => true } : {}),
             browser: browser as any
         });
 
@@ -1325,16 +906,12 @@ export class DeviceManager {
             } else if (connection === 'open') {
                 this.clearConnectWatchdog(deviceId);
                 this.reconnectAttempts.set(deviceId, 0);
-                this.forceFullHistorySync.delete(deviceId);
                 const phoneNumber = sock.user?.id.split(':')[0] || null;
                 this.updateDevice(deviceId, { status: 'CONNECTED', phoneNumber, qr: null });
             }
         });
 
-        sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress }) => {
-            this.lastHistorySetAt.set(deviceId, Date.now());
-            if (typeof progress === 'number') this.historySyncProgress.set(deviceId, progress);
-            if (typeof isLatest === 'boolean') this.historySyncIsLatest.set(deviceId, isLatest);
+        sock.ev.on('messaging-history.set', ({ chats, contacts, messages }) => {
             const store = stores.get(deviceId);
             if (!store) return;
 
@@ -1369,7 +946,6 @@ export class DeviceManager {
                     this.upsertHistoryMessage(deviceId, store, m);
                 }
             }
-            this.updateImportJobFromStore(deviceId);
         });
 
         sock.ev.on('messages.upsert', async (m) => {
