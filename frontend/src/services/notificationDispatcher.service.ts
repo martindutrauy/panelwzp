@@ -12,6 +12,7 @@ type IncomingMessageEvent = {
     msgId?: string | null;
     timestamp?: number;
     senderName?: string | null;
+    messageText?: string | null;
 };
 
 const playedByMsg = new Map<string, number>();
@@ -20,6 +21,15 @@ type SpeakState = { lastAt: number; pending: number; timer: number | null; lastN
 const speakByContact = new Map<string, SpeakState>();
 
 const normalizeName = (name: string) => String(name || '').trim();
+
+const normalizeKey = (value: string) => {
+    const v = String(value || '').trim().toLowerCase();
+    try {
+        return v.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    } catch {
+        return v;
+    }
+};
 
 const contactKeyOf = (chatId: string) => {
     if (!chatId) return '';
@@ -59,6 +69,21 @@ export const notifyIncomingMessage = (evt: IncomingMessageEvent) => {
     const focused = isChatInFocus(branchId, chatId);
     debug(branchId, s.debugLogs, `[branchId=${branchId}] nuevo mensaje: chat=${chatId} focus=${focused}`);
 
+    const chatName = normalizeKey(String(evt.senderName || ''));
+    const text = normalizeKey(String(evt.messageText || ''));
+    const isNewWebOrder = chatName.includes('zarpar administracion') && text.includes('nuevo pedido web');
+    if (isNewWebOrder) {
+        if (isTtsSupported()) {
+            enqueueTts({
+                text: 'Atentos NUEVO PEDIDO WEB Atentos, armar pedido.',
+                voiceURI: s.ttsVoiceURI,
+                lang: s.ttsLang === 'auto' ? null : s.ttsLang,
+                rate: s.ttsRate,
+                pitch: s.ttsPitch
+            });
+        }
+    }
+
     if (s.toneEnabled) {
         if (!focused || s.playToneWhileChatOpen) {
             if (s.toneId === CUSTOM_TONE_ID) {
@@ -71,6 +96,8 @@ export const notifyIncomingMessage = (evt: IncomingMessageEvent) => {
             debug(branchId, s.debugLogs, `[branchId=${branchId}] tone suppressed (focus)`);
         }
     }
+
+    if (isNewWebOrder) return;
 
     if (!s.ttsEnabled) return;
     if (!isTtsSupported()) return;

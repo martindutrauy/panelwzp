@@ -73,7 +73,8 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
                 fromMe: false,
                 msgId: data?.msg?.id ? String(data.msg.id) : null,
                 timestamp: typeof data?.msg?.timestamp === 'number' ? data.msg.timestamp : undefined,
-                senderName
+                senderName,
+                messageText: data?.msg?.text ? String(data.msg.text) : null
             });
         };
 

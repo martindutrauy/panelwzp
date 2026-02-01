@@ -33,6 +33,7 @@ Persistencia:
   - `devices.json` (sucursales/dispositivos)
   - `storage/` (archivos)
   - `auth/<deviceId>/` (sesiones Baileys)
+  - `messages/` (base propia del panel: backup de mensajes por sucursal)
 
 ### Frontend (service del frontend)
 
@@ -161,4 +162,3 @@ Esto indica problema de persistencia:
 
 1. Asegurar que el archivo exista en `docs/DEPLOY_RAILWAY.md`.
 2. Subirlo al repo mediante commit normal (GitHub Desktop o git).
-
