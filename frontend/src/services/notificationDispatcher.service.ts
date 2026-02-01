@@ -1,4 +1,4 @@
-import { playNotificationTone } from './notificationSound.service';
+import { CUSTOM_TONE_ID, playCustomNotificationTone, playNotificationTone } from './notificationSound.service';
 import { isChatInFocus } from './notificationFocus.service';
 import { getBranchNotificationSettings } from './branchNotificationSettings.service';
 import { enqueueTts } from './notificationQueueManager.service';
@@ -61,7 +61,11 @@ export const notifyIncomingMessage = (evt: IncomingMessageEvent) => {
 
     if (s.toneEnabled) {
         if (!focused || s.playToneWhileChatOpen) {
-            playNotificationTone({ toneId: s.toneId, volume: s.toneVolume });
+            if (s.toneId === CUSTOM_TONE_ID) {
+                void playCustomNotificationTone({ branchId, volume: s.toneVolume });
+            } else {
+                playNotificationTone({ toneId: s.toneId, volume: s.toneVolume });
+            }
             debug(branchId, s.debugLogs, `[branchId=${branchId}] tone played`);
         } else {
             debug(branchId, s.debugLogs, `[branchId=${branchId}] tone suppressed (focus)`);

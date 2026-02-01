@@ -1,3 +1,5 @@
+import { loadCustomNotificationTone } from './customNotificationToneStorage.service';
+
 type ToneRequest = {
     toneId: number;
     volume: number;
@@ -5,9 +7,12 @@ type ToneRequest = {
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
+export const CUSTOM_TONE_ID = 900;
+
 let audioCtx: AudioContext | null = null;
 let sapeAudio: HTMLAudioElement | null = null;
 let lokitaAudio: HTMLAudioElement | null = null;
+const customToneUrlByBranch = new Map<string, string>();
 
 const getAudioCtx = () => {
     if (audioCtx) return audioCtx;
@@ -138,5 +143,39 @@ export const playNotificationTone = ({ toneId, volume }: ToneRequest) => {
             default:
                 createOsc('sine', 880, now, 0.08, 0.08 * base);
         }
+    } catch {}
+};
+
+const getCustomToneUrl = async (branchId: string) => {
+    const id = String(branchId || '').trim();
+    if (!id) return null;
+    const cached = customToneUrlByBranch.get(id);
+    if (cached) return cached;
+    const blob = await loadCustomNotificationTone(id).catch(() => null);
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    customToneUrlByBranch.set(id, url);
+    return url;
+};
+
+export const revokeCustomToneCache = (branchId: string) => {
+    const id = String(branchId || '').trim();
+    if (!id) return;
+    const url = customToneUrlByBranch.get(id);
+    if (url) {
+        try { URL.revokeObjectURL(url); } catch {}
+    }
+    customToneUrlByBranch.delete(id);
+};
+
+export const playCustomNotificationTone = async ({ branchId, volume }: { branchId: string; volume: number }) => {
+    const vol = clamp(Number(volume) || 0, 0, 1);
+    if (vol <= 0) return;
+    const url = await getCustomToneUrl(branchId);
+    if (!url) return;
+    try {
+        const a = new Audio(url);
+        a.volume = clamp(vol, 0, 1);
+        a.play().catch(() => {});
     } catch {}
 };

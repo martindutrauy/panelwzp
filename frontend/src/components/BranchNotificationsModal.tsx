@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Divider, Modal, Radio, Select, Slider, Space, Switch, Typography, message } from 'antd';
 import { Play } from 'lucide-react';
 import { getBranchNotificationSettings, setBranchNotificationSettings, subscribeBranchNotificationSettings } from '../services/branchNotificationSettings.service';
-import { playNotificationTone, unlockNotificationAudio } from '../services/notificationSound.service';
+import { CUSTOM_TONE_ID, playCustomNotificationTone, playNotificationTone, revokeCustomToneCache, unlockNotificationAudio } from '../services/notificationSound.service';
+import { deleteCustomNotificationTone, loadCustomNotificationTone, saveCustomNotificationTone } from '../services/customNotificationToneStorage.service';
 import { getTtsVoices, initTts } from '../services/tts.service';
 import { enqueueTts } from '../services/notificationQueueManager.service';
 
@@ -22,9 +23,17 @@ export const BranchNotificationsModal = ({
     const [messageApi, contextHolder] = message.useMessage();
     const [settings, setSettings] = useState(() => getBranchNotificationSettings(branchId));
     const [voicesVersion, setVoicesVersion] = useState(0);
+    const [hasCustomTone, setHasCustomTone] = useState(false);
+    const [recording, setRecording] = useState(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         setSettings(getBranchNotificationSettings(branchId));
+        void loadCustomNotificationTone(branchId)
+            .then((b) => setHasCustomTone(Boolean(b)))
+            .catch(() => setHasCustomTone(false));
         return subscribeBranchNotificationSettings((id, s) => {
             if (id !== branchId) return;
             setSettings(s);
@@ -56,7 +65,11 @@ export const BranchNotificationsModal = ({
 
     const testNotification = () => {
         unlockNotificationAudio();
-        playNotificationTone({ toneId: settings.toneId, volume: settings.toneVolume });
+        if (settings.toneId === CUSTOM_TONE_ID) {
+            void playCustomNotificationTone({ branchId, volume: settings.toneVolume });
+        } else {
+            playNotificationTone({ toneId: settings.toneId, volume: settings.toneVolume });
+        }
         const text = `${branchName}, mensaje de Juan Pérez`;
         window.setTimeout(() => {
             enqueueTts({
@@ -70,9 +83,95 @@ export const BranchNotificationsModal = ({
         messageApi.success('Notificación enviada (voz en 5s)');
     };
 
+    const stopRecording = () => {
+        const mr = mediaRecorderRef.current;
+        if (mr && mr.state !== 'inactive') {
+            try { mr.stop(); } catch {}
+        }
+        const st = mediaStreamRef.current;
+        if (st) {
+            for (const t of st.getTracks()) {
+                try { t.stop(); } catch {}
+            }
+        }
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
+        setRecording(false);
+    };
+
+    useEffect(() => {
+        if (open) return;
+        stopRecording();
+    }, [open]);
+
+    const startRecording = async () => {
+        if (recording) return;
+        if (!('MediaRecorder' in window)) {
+            messageApi.error('Tu navegador no soporta grabación de audio');
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+            const chunks: BlobPart[] = [];
+            const mr = new MediaRecorder(stream);
+            mediaRecorderRef.current = mr;
+            mr.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            mr.onstop = async () => {
+                const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+                await saveCustomNotificationTone(branchId, blob);
+                revokeCustomToneCache(branchId);
+                setHasCustomTone(true);
+                setBranchNotificationSettings(branchId, { toneId: CUSTOM_TONE_ID });
+                unlockNotificationAudio();
+                void playCustomNotificationTone({ branchId, volume: settings.toneVolume });
+            };
+            mr.start();
+            setRecording(true);
+        } catch (e: any) {
+            messageApi.error(String(e?.message || 'No se pudo acceder al micrófono'));
+            stopRecording();
+        }
+    };
+
+    const onPickFile = () => {
+        fileInputRef.current?.click();
+    };
+
+    const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (!f) return;
+        if (!String(f.type || '').startsWith('audio/')) {
+            messageApi.error('Elegí un archivo de audio');
+            return;
+        }
+        await saveCustomNotificationTone(branchId, f);
+        revokeCustomToneCache(branchId);
+        setHasCustomTone(true);
+        setBranchNotificationSettings(branchId, { toneId: CUSTOM_TONE_ID });
+        unlockNotificationAudio();
+        void playCustomNotificationTone({ branchId, volume: settings.toneVolume });
+        messageApi.success('Tono personalizado guardado');
+    };
+
+    const clearCustom = async () => {
+        stopRecording();
+        await deleteCustomNotificationTone(branchId).catch(() => {});
+        revokeCustomToneCache(branchId);
+        setHasCustomTone(false);
+        if (settings.toneId === CUSTOM_TONE_ID) {
+            setBranchNotificationSettings(branchId, { toneId: 1 });
+        }
+        messageApi.success('Tono personalizado eliminado');
+    };
+
     return (
         <Modal open={open} title={`Notificaciones (${branchName})`} onCancel={onClose} footer={null} width={440}>
             {contextHolder}
+            <input ref={fileInputRef} type="file" accept="audio/*" style={{ display: 'none' }} onChange={onFileChange} />
             <Typography.Title level={5}>Tono</Typography.Title>
             <Space direction="vertical" style={{ width: '100%' }} size={10}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -105,7 +204,11 @@ export const BranchNotificationsModal = ({
                             localStorage.setItem('notificationTone', String(val));
                             setBranchNotificationSettings(branchId, { toneId: val });
                             unlockNotificationAudio();
-                            playNotificationTone({ toneId: val, volume: settings.toneVolume });
+                            if (val === CUSTOM_TONE_ID) {
+                                void playCustomNotificationTone({ branchId, volume: settings.toneVolume });
+                            } else {
+                                playNotificationTone({ toneId: val, volume: settings.toneVolume });
+                            }
                         }}
                         value={settings.toneId}
                         style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
@@ -124,6 +227,8 @@ export const BranchNotificationsModal = ({
                             { id: 11, name: 'Sapeee (Bananero)' },
                             { id: 12, name: 'Bird (Ave)' },
                             { id: 13, name: 'Lokita (Bananero)' }
+                            ,
+                            { id: CUSTOM_TONE_ID, name: 'Personalizado' }
                         ].map(tone => (
                             <div key={tone.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#202c33', borderRadius: 8, border: '1px solid #2a3942' }}>
                                 <Radio value={tone.id} style={{ color: '#e9edef' }}>{tone.name}</Radio>
@@ -134,12 +239,38 @@ export const BranchNotificationsModal = ({
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         unlockNotificationAudio();
-                                        playNotificationTone({ toneId: tone.id, volume: settings.toneVolume });
+                                        if (tone.id === CUSTOM_TONE_ID) {
+                                            void playCustomNotificationTone({ branchId, volume: settings.toneVolume });
+                                        } else {
+                                            playNotificationTone({ toneId: tone.id, volume: settings.toneVolume });
+                                        }
                                     }}
                                 />
                             </div>
                         ))}
                     </Radio.Group>
+                </div>
+                <div style={{ padding: 12, background: '#111b21', border: '1px solid #2a3942', borderRadius: 8 }}>
+                    <Text style={{ color: '#e9edef', display: 'block', marginBottom: 8 }}>Tono personalizado</Text>
+                    <Space wrap>
+                        <Button onClick={onPickFile}>Subir audio</Button>
+                        {!recording ? (
+                            <Button onClick={startRecording}>Grabar</Button>
+                        ) : (
+                            <Button danger onClick={stopRecording}>Detener</Button>
+                        )}
+                        <Button disabled={!hasCustomTone} onClick={() => void playCustomNotificationTone({ branchId, volume: settings.toneVolume })}>
+                            Escuchar
+                        </Button>
+                        <Button disabled={!hasCustomTone} danger onClick={() => void clearCustom()}>
+                            Borrar
+                        </Button>
+                    </Space>
+                    <div style={{ marginTop: 8 }}>
+                        <Text style={{ color: '#8696a0', fontSize: 12 }}>
+                            {recording ? 'Grabando... (usa Detener para guardar)' : hasCustomTone ? 'Guardado para esta sucursal' : 'Aún no hay audio cargado'}
+                        </Text>
+                    </div>
                 </div>
             </Space>
             <Divider />
