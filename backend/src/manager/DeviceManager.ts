@@ -12,6 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import crypto from 'crypto';
+import readline from 'readline';
 import { spawn } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { Server as SocketServer } from 'socket.io';
@@ -251,12 +252,131 @@ export class DeviceManager {
     private avatarFetchInFlight: Map<string, Set<string>> = new Map();
     private avatarFetchLastAt: Map<string, number> = new Map();
     private messageRetentionDays = 90;
+    private messagesDbRoot = dbPath('messages');
+    private messageWriteChains: Map<string, Promise<void>> = new Map();
+    private recentPersistedIds: Map<string, { ids: string[]; set: Set<string> }> = new Map();
 
     private constructor() {
         ensureDir(DB_ROOT);
         ensureDir(this.storageRoot);
+        ensureDir(this.messagesDbRoot);
         this.loadData();
         this.initRetentionJob();
+    }
+
+    private getDeviceMessagesDbPath(deviceId: string) {
+        return path.join(this.messagesDbRoot, `${deviceId}.jsonl`);
+    }
+
+    private rememberPersistedId(deviceId: string, msgId: string) {
+        if (!msgId) return;
+        const existing = this.recentPersistedIds.get(deviceId) || { ids: [], set: new Set<string>() };
+        if (existing.set.has(msgId)) return;
+        existing.ids.push(msgId);
+        existing.set.add(msgId);
+        const max = 5000;
+        while (existing.ids.length > max) {
+            const old = existing.ids.shift();
+            if (old) existing.set.delete(old);
+        }
+        this.recentPersistedIds.set(deviceId, existing);
+    }
+
+    private shouldSkipPersist(deviceId: string, msgId: string) {
+        if (!msgId) return false;
+        const existing = this.recentPersistedIds.get(deviceId);
+        return existing ? existing.set.has(msgId) : false;
+    }
+
+    private enqueueAppendLine(deviceId: string, line: string) {
+        const filePath = this.getDeviceMessagesDbPath(deviceId);
+        const prev = this.messageWriteChains.get(deviceId) || Promise.resolve();
+        const next = prev
+            .then(async () => {
+                await fs.promises.appendFile(filePath, line, { encoding: 'utf8' });
+            })
+            .catch(() => {});
+        this.messageWriteChains.set(deviceId, next);
+        return next;
+    }
+
+    private async restoreMessagesFromDisk(deviceId: string, store: SimpleStore) {
+        if (store.messages.size > 0) return;
+        const filePath = this.getDeviceMessagesDbPath(deviceId);
+        if (!fs.existsSync(filePath)) return;
+
+        const cutoff = this.getMessageRetentionCutoffMs(Date.now());
+        const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+        for await (const line of rl) {
+            const trimmed = String(line || '').trim();
+            if (!trimmed) continue;
+            let rec: any = null;
+            try {
+                rec = JSON.parse(trimmed);
+            } catch {
+                continue;
+            }
+            const chatId = String(rec?.chatId || '');
+            if (!chatId) continue;
+            const msg = rec?.msg;
+            if (!msg) continue;
+
+            const ts = this.getStoredMessageTimestampMs(msg);
+            if (!ts || ts < cutoff) continue;
+
+            const msgId = String(msg?.key?.id || msg?.id || '');
+            if (msgId) this.rememberPersistedId(deviceId, msgId);
+
+            if (!store.messages.has(chatId)) store.messages.set(chatId, []);
+            const arr = store.messages.get(chatId)!;
+            if (msgId) {
+                const exists = arr.slice(-200).some((m: any) => String(m?.key?.id || m?.id || '') === msgId);
+                if (exists) continue;
+            }
+            arr.push(msg);
+
+            const name = String(rec?.chatName || rec?.contactName || '').trim() || chatId.split('@')[0];
+            const existingChat = store.chats.get(chatId) || { id: chatId, name, conversationTimestamp: ts, unreadCount: 0 };
+            if (name && existingChat.name !== name) existingChat.name = name;
+            existingChat.conversationTimestamp = Math.max(Number(existingChat.conversationTimestamp || 0), ts);
+            store.chats.set(chatId, existingChat);
+
+            const contactName = String(rec?.contactName || '').trim();
+            if (contactName && !chatId.endsWith('@g.us')) {
+                store.contacts.set(chatId, contactName);
+            }
+        }
+
+        for (const [chatId, msgs] of store.messages.entries()) {
+            if (!Array.isArray(msgs) || msgs.length === 0) {
+                store.messages.delete(chatId);
+                continue;
+            }
+            msgs.sort((a: any, b: any) => Number(this.getStoredMessageTimestampMs(a)) - Number(this.getStoredMessageTimestampMs(b)));
+            store.messages.set(chatId, msgs);
+        }
+        this.pruneOldMessages(deviceId);
+    }
+
+    private persistStoredMessage(deviceId: string, chatId: string, msg: any, chatName?: string | null, contactName?: string | null) {
+        const id = String(msg?.key?.id || msg?.id || '');
+        if (id && this.shouldSkipPersist(deviceId, id)) return;
+
+        const ts = this.getStoredMessageTimestampMs(msg);
+        if (!ts) return;
+        if (ts < this.getMessageRetentionCutoffMs(Date.now())) return;
+
+        const payload = {
+            chatId,
+            chatName: chatName ?? null,
+            contactName: contactName ?? null,
+            msg
+        };
+        const line = `${JSON.stringify(payload)}\n`;
+        void this.enqueueAppendLine(deviceId, line);
+        if (id) this.rememberPersistedId(deviceId, id);
     }
 
     private clearConnectWatchdog(deviceId: string) {
@@ -597,6 +717,7 @@ export class DeviceManager {
         cron.schedule('0 * * * *', () => {
             try {
                 this.pruneOldMessagesForAllDevices();
+                this.compactAllDeviceMessagesDb();
             } catch {}
         });
     }
@@ -654,6 +775,66 @@ export class DeviceManager {
         const now = Date.now();
         for (const deviceId of stores.keys()) {
             this.pruneOldMessages(deviceId, now);
+        }
+    }
+
+    private async compactDeviceMessagesDbInternal(deviceId: string, nowMs: number) {
+        const filePath = this.getDeviceMessagesDbPath(deviceId);
+        if (!fs.existsSync(filePath)) return;
+
+        const cutoff = this.getMessageRetentionCutoffMs(nowMs);
+        const tmpPath = `${filePath}.tmp`;
+
+        const readStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+        const rl = readline.createInterface({ input: readStream, crlfDelay: Infinity });
+        const writeStream = fs.createWriteStream(tmpPath, { encoding: 'utf8' });
+
+        try {
+            for await (const line of rl) {
+                const trimmed = String(line || '').trim();
+                if (!trimmed) continue;
+                let rec: any = null;
+                try {
+                    rec = JSON.parse(trimmed);
+                } catch {
+                    continue;
+                }
+                const msg = rec?.msg;
+                if (!msg) continue;
+                const ts = this.getStoredMessageTimestampMs(msg);
+                if (!ts || ts < cutoff) continue;
+                writeStream.write(`${JSON.stringify(rec)}\n`);
+            }
+        } finally {
+            try {
+                rl.close();
+            } catch {}
+            try {
+                readStream.close();
+            } catch {}
+            await new Promise<void>((resolve) => writeStream.end(() => resolve()));
+        }
+
+        await fs.promises.rename(tmpPath, filePath).catch(async () => {
+            try {
+                await fs.promises.unlink(tmpPath);
+            } catch {}
+        });
+    }
+
+    private compactDeviceMessagesDb(deviceId: string) {
+        const now = Date.now();
+        const prev = this.messageWriteChains.get(deviceId) || Promise.resolve();
+        const next = prev
+            .then(() => this.compactDeviceMessagesDbInternal(deviceId, now))
+            .catch(() => {});
+        this.messageWriteChains.set(deviceId, next);
+    }
+
+    private compactAllDeviceMessagesDb() {
+        for (const d of this.devices) {
+            if (!d?.id) continue;
+            this.compactDeviceMessagesDb(d.id);
         }
     }
 
@@ -780,7 +961,7 @@ export class DeviceManager {
                 const exists = arr.slice(-200).some((m: any) => (m?.key?.id || m?.id) === id);
                 if (exists) return;
             }
-            arr.push({
+            const stored = {
                 key: msg.key,
                 message: msg.message,
                 messageTimestamp: msg.messageTimestamp,
@@ -790,7 +971,9 @@ export class DeviceManager {
                 media: null,
                 location,
                 source: 'phone'
-            });
+            };
+            arr.push(stored);
+            this.persistStoredMessage(deviceId, unifiedChatId, stored, existingChat?.name || chatName, contactName || null);
         }
     }
 
@@ -813,6 +996,7 @@ export class DeviceManager {
         // Crear store simple en memoria para este dispositivo (o reutilizar el existente)
         const store = stores.get(deviceId) || createSimpleStore();
         stores.set(deviceId, store);
+        await this.restoreMessagesFromDisk(deviceId, store);
 
         const currentMode = this.pairingMode.get(deviceId) || mode || 'qr';
         
@@ -1085,7 +1269,7 @@ export class DeviceManager {
                     if (!store.messages.has(unifiedChatId)) {
                         store.messages.set(unifiedChatId, []);
                     }
-                    store.messages.get(unifiedChatId)!.push({
+                    const stored = {
                         key: msg.key,
                         message: msg.message,
                         messageTimestamp: msg.messageTimestamp,
@@ -1095,7 +1279,9 @@ export class DeviceManager {
                         media: mediaMetadata,
                         location,
                         source
-                    });
+                    };
+                    store.messages.get(unifiedChatId)!.push(stored);
+                    this.persistStoredMessage(deviceId, unifiedChatId, stored, existingChat?.name || chatName, contactName || null);
                 }
 
                 this.scheduleProfilePhotoFetch(deviceId, unifiedChatId);
@@ -1837,6 +2023,13 @@ export class DeviceManager {
             } catch (error) {
                 console.error(`[${deviceId}] Error al eliminar carpeta storage:`, error);
             }
+        }
+
+        const messagesDbPath = this.getDeviceMessagesDbPath(deviceId);
+        if (fs.existsSync(messagesDbPath)) {
+            try {
+                fs.rmSync(messagesDbPath, { force: true });
+            } catch {}
         }
 
         // 4. Actualizar estado del dispositivo
