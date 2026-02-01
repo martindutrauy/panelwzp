@@ -742,6 +742,109 @@ export class DeviceManager {
         return 0;
     }
 
+    private extractDisplayText(msg: any) {
+        const m = msg?.message ? msg.message : msg;
+        const text =
+            m?.conversation ||
+            m?.extendedTextMessage?.text ||
+            m?.imageMessage?.caption ||
+            m?.videoMessage?.caption ||
+            m?.documentMessage?.caption ||
+            null;
+        if (text) return text;
+
+        const normalizePhone = (raw: string) => {
+            const s = String(raw || '').trim();
+            if (!s) return '';
+            const hasPlus = s.startsWith('+');
+            const digits = s.replace(/[^\d]/g, '');
+            if (!digits) return '';
+            return hasPlus ? `+${digits}` : digits;
+        };
+
+        const parseVcard = (raw: string) => {
+            const v = String(raw || '').trim();
+            if (!v) return { name: '', phones: [] as string[] };
+            const lines = v.split(/\r?\n/).map((x) => String(x || '').trim()).filter(Boolean);
+            let name = '';
+            const phones: string[] = [];
+            for (const line of lines) {
+                const idx = line.indexOf(':');
+                if (idx <= 0) continue;
+                const key = line.slice(0, idx).toUpperCase();
+                const value = line.slice(idx + 1).trim();
+                if (!value) continue;
+                if (key === 'FN') {
+                    if (!name) name = value;
+                    continue;
+                }
+                if (key === 'N') {
+                    if (!name) {
+                        const parts = value.split(';').map((p) => p.trim()).filter(Boolean);
+                        const composed = [parts[1], parts[0]].filter(Boolean).join(' ').trim();
+                        if (composed) name = composed;
+                    }
+                    continue;
+                }
+                if (key.startsWith('TEL')) {
+                    const phone = normalizePhone(value);
+                    if (!phone) continue;
+                    if (!phones.includes(phone)) phones.push(phone);
+                }
+            }
+            return { name: String(name || '').trim(), phones };
+        };
+
+        const contact = m?.contactMessage;
+        if (contact) {
+            const displayName = String(contact?.displayName || '').trim();
+            const { name: vName, phones } = parseVcard(String(contact?.vcard || ''));
+            const name = displayName || vName;
+            const phone = phones[0] || '';
+            if (name && phone) return `Contacto: ${name} (${phone})`;
+            if (name) return `Contacto: ${name}`;
+            if (phone) return `Contacto: ${phone}`;
+            return 'Contacto compartido';
+        }
+
+        const contactsArray = m?.contactsArrayMessage;
+        if (contactsArray) {
+            const contacts = Array.isArray(contactsArray?.contacts) ? contactsArray.contacts : [];
+            if (contacts.length === 1) {
+                const c = contacts[0] || {};
+                const displayName = String(c?.displayName || '').trim();
+                const { name: vName, phones } = parseVcard(String(c?.vcard || ''));
+                const name = displayName || vName;
+                const phone = phones[0] || '';
+                if (name && phone) return `Contacto: ${name} (${phone})`;
+                if (name) return `Contacto: ${name}`;
+                if (phone) return `Contacto: ${phone}`;
+                return 'Contacto compartido';
+            }
+            if (contacts.length > 1) {
+                const labels = contacts
+                    .slice(0, 2)
+                    .map((c: any) => {
+                        const displayName = String(c?.displayName || '').trim();
+                        const { name: vName, phones } = parseVcard(String(c?.vcard || ''));
+                        const name = displayName || vName;
+                        const phone = phones[0] || '';
+                        if (name && phone) return `${name} (${phone})`;
+                        if (name) return name;
+                        if (phone) return phone;
+                        return 'Contacto';
+                    })
+                    .filter(Boolean);
+                const extra = contacts.length - labels.length;
+                const base = labels.join(', ');
+                return extra > 0 ? `Contactos: ${base} (+${extra} más)` : `Contactos: ${base}`;
+            }
+            return 'Contactos compartidos';
+        }
+
+        return null;
+    }
+
     private pruneOldMessages(deviceId: string, nowMs: number = Date.now()) {
         const store = stores.get(deviceId);
         if (!store) return { removed: 0, remaining: 0 };
@@ -890,13 +993,7 @@ export class DeviceManager {
             mergeChatData(store, chatId, unifiedChatId);
         }
 
-        const text =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            msg.message?.documentMessage?.caption ||
-            null;
+        const text = this.extractDisplayText(msg);
 
         const locationMessage = (msg.message as any)?.locationMessage || (msg.message as any)?.liveLocationMessage || null;
         const location = locationMessage
@@ -1189,13 +1286,7 @@ export class DeviceManager {
 
                 const mediaMetadata = await this.handleMedia(deviceId, msg);
 
-                // Extraer texto del mensaje
-                const text = msg.message?.conversation ||
-                    msg.message?.extendedTextMessage?.text ||
-                    msg.message?.imageMessage?.caption ||
-                    msg.message?.videoMessage?.caption ||
-                    msg.message?.documentMessage?.caption ||
-                    null;
+                const text = this.extractDisplayText(msg);
 
                 const locationMessage = (msg.message as any)?.locationMessage || (msg.message as any)?.liveLocationMessage || null;
                 const location = locationMessage
@@ -1961,9 +2052,7 @@ export class DeviceManager {
 
                 return {
                     id: msg.key?.id || msg.id,
-                    text: msg.text || msg.message?.conversation ||
-                        msg.message?.extendedTextMessage?.text ||
-                        (location ? null : (msg.media ? null : '[Media]')),
+                    text: msg.text || this.extractDisplayText(msg) || (location ? null : (msg.media ? null : '[Media]')),
                     fromMe: msg.fromMe ?? msg.key?.fromMe,
                     timestamp: msg.timestamp || (msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
                     source: msg.source || ((msg.fromMe ?? msg.key?.fromMe) ? 'phone' : 'contact'),
