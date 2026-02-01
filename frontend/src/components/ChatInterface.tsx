@@ -59,7 +59,17 @@ interface SearchResult {
     matchHighlight: string;
 }
 
-export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: () => void }) => {
+export const ChatInterface = ({
+    device,
+    onClose,
+    onActiveChatChange,
+    refreshToken
+}: {
+    device: Device;
+    onClose?: () => void;
+    onActiveChatChange?: (chatId: string | null) => void;
+    refreshToken?: number;
+}) => {
     const [messageApi, contextHolder] = message.useMessage();
     const [notificationApi, notificationContextHolder] = notification.useNotification();
     const socket = useSocket();
@@ -80,6 +90,10 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
     const [showSearchModal, setShowSearchModal] = useState(false);
     const [pendingScrollMsgId, setPendingScrollMsgId] = useState<string | null>(null);
     const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
+
+    useEffect(() => {
+        onActiveChatChange?.(activeChat);
+    }, [activeChat]);
     const [templates, setTemplates] = useState<{id: string, shortcut: string, content: string}[]>([]);
     const [showPairingModal, setShowPairingModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -192,6 +206,11 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
         if (!activeChat) return;
         void loadMessages(activeChat);
     }, [activeChat, device.id]);
+
+    useEffect(() => {
+        if (!activeChat) return;
+        void loadMessages(activeChat);
+    }, [refreshToken]);
 
     useEffect(() => {
         if (!pendingScrollMsgId) return;

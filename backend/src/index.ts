@@ -190,6 +190,17 @@ app.get('/api/devices/:id/chats/:chatId/messages', async (req, res) => {
     }
 });
 
+// Importar mensajes desde el dispositivo (solo si el chat está vacío en el panel)
+app.post('/api/devices/:id/chats/:chatId/import-messages', async (req, res) => {
+    try {
+        const result = await deviceManager.importChatMessagesFromDevice(req.params.id, req.params.chatId);
+        res.json(result);
+    } catch (error: any) {
+        const status = Number(error?.status || 500);
+        res.status(status).json({ error: error.message });
+    }
+});
+
 app.post('/api/devices/:id/chats/:chatId/import-profile-photo', async (req, res) => {
     try {
         const result = await deviceManager.importChatProfilePhoto(req.params.id, req.params.chatId);

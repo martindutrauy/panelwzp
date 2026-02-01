@@ -640,6 +640,146 @@ export class DeviceManager {
         }
     }
 
+    private upsertHistoryMessage(deviceId: string, store: SimpleStore, msg: any) {
+        const originalChatId = msg?.key?.remoteJid;
+        if (!originalChatId) return;
+        if (originalChatId === 'status@broadcast') return;
+
+        const chatId = String(originalChatId);
+        const chatKey = chatKeyOf(chatId);
+        let unifiedChatId = resolveCanonicalChatId(store, chatId);
+
+        if (unifiedChatId !== chatId) {
+            mergeChatData(store, chatId, unifiedChatId);
+        }
+
+        const text =
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption ||
+            msg.message?.documentMessage?.caption ||
+            null;
+
+        const locationMessage = (msg.message as any)?.locationMessage || (msg.message as any)?.liveLocationMessage || null;
+        const location = locationMessage
+            ? {
+                latitude: Number(locationMessage.degreesLatitude ?? locationMessage.latitude),
+                longitude: Number(locationMessage.degreesLongitude ?? locationMessage.longitude),
+                name: locationMessage.name ?? null,
+                address: locationMessage.address ?? null
+            }
+            : null;
+
+        const tsSec = msg.messageTimestamp ? Number(msg.messageTimestamp) : 0;
+        const timestamp = tsSec ? tsSec * 1000 : Date.now();
+        const fromMe = Boolean(msg?.key?.fromMe);
+
+        if (store) {
+            const pushName = msg?.pushName;
+            if (pushName && !fromMe && unifiedChatId) {
+                store.contacts.set(unifiedChatId, pushName);
+            }
+
+            const contactName = store.contacts.get(unifiedChatId) || store.contacts.get(chatId) || pushName;
+            if (contactName && !unifiedChatId.endsWith('@g.us')) {
+                const byName = resolveCanonicalChatIdByName(store, unifiedChatId, contactName);
+                if (byName !== unifiedChatId) {
+                    store.canonicalByKey.set(chatKey, byName);
+                    store.aliases.set(unifiedChatId, byName);
+                    mergeChatData(store, unifiedChatId, byName);
+                    unifiedChatId = byName;
+                }
+                if (pushName && !fromMe && unifiedChatId) {
+                    store.contacts.set(unifiedChatId, pushName);
+                }
+            }
+
+            let chatName: string;
+            if (unifiedChatId.endsWith('@g.us')) {
+                chatName = contactName || unifiedChatId.split('@')[0] + ' (Grupo)';
+            } else {
+                chatName = contactName || unifiedChatId.split('@')[0];
+            }
+
+            const existingChat = store.chats.get(unifiedChatId) || {
+                id: unifiedChatId,
+                name: chatName,
+                conversationTimestamp: timestamp,
+                unreadCount: 0
+            };
+            if (contactName && existingChat.name !== contactName) {
+                existingChat.name = contactName;
+            }
+            existingChat.conversationTimestamp = Math.max(Number(existingChat.conversationTimestamp || 0), timestamp);
+            store.chats.set(unifiedChatId, existingChat);
+
+            if (!store.messages.has(unifiedChatId)) {
+                store.messages.set(unifiedChatId, []);
+            }
+            const arr = store.messages.get(unifiedChatId)!;
+            const id = msg?.key?.id;
+            if (id) {
+                const exists = arr.slice(-200).some((m: any) => (m?.key?.id || m?.id) === id);
+                if (exists) return;
+            }
+            arr.push({
+                key: msg.key,
+                message: msg.message,
+                messageTimestamp: msg.messageTimestamp,
+                text,
+                fromMe,
+                timestamp,
+                media: null,
+                location,
+                source: 'phone'
+            });
+        }
+    }
+
+    public async importChatMessagesFromDevice(deviceId: string, chatId: string) {
+        const sock = this.sessions.get(deviceId);
+        if (!sock) throw Object.assign(new Error('Device not connected'), { status: 400 });
+
+        const store = stores.get(deviceId);
+        if (!store) throw Object.assign(new Error('Store no encontrado'), { status: 500 });
+
+        const canonicalId = resolveCanonicalChatId(store, chatId);
+        const existing = store.messages.get(canonicalId) || [];
+        if (existing.length > 0) throw Object.assign(new Error('El chat no está vacío'), { status: 409 });
+
+        const before = existing.length;
+
+        const waitForMessages = async (timeoutMs: number) => {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                const cur = store.messages.get(canonicalId) || [];
+                if (cur.length > 0) return cur.length;
+                await new Promise((r) => setTimeout(r, 300));
+            }
+            return 0;
+        };
+
+        const fromOngoing = await waitForMessages(2000);
+        if (fromOngoing > 0) {
+            return { success: true, chatId: canonicalId, imported: fromOngoing - before };
+        }
+
+        try {
+            await sock.fetchMessageHistory(
+                50,
+                { remoteJid: canonicalId, fromMe: false, id: '0' } as any,
+                0 as any
+            );
+        } catch (e: any) {
+            const after0 = store.messages.get(canonicalId)?.length || 0;
+            return { success: after0 > 0, chatId: canonicalId, imported: Math.max(0, after0 - before), error: String(e?.message || 'No se pudo solicitar historial') };
+        }
+
+        const after = await waitForMessages(8000);
+        return { success: after > 0, chatId: canonicalId, imported: Math.max(0, after - before) };
+    }
+
     public async initDevice(deviceId: string, mode?: 'qr' | 'code') {
         const existingDevice = this.devices.find(d => d.id === deviceId);
         if (!existingDevice) throw new Error('Dispositivo no encontrado');
@@ -656,8 +796,8 @@ export class DeviceManager {
         const { state, saveCreds } = await useMultiFileAuthState(authPath);
         const { version } = await fetchLatestBaileysVersion();
 
-        // Crear store simple en memoria para este dispositivo
-        const store = createSimpleStore();
+        // Crear store simple en memoria para este dispositivo (o reutilizar el existente)
+        const store = stores.get(deviceId) || createSimpleStore();
         stores.set(deviceId, store);
 
         const currentMode = this.pairingMode.get(deviceId) || mode || 'qr';
@@ -755,6 +895,43 @@ export class DeviceManager {
                 this.reconnectAttempts.set(deviceId, 0);
                 const phoneNumber = sock.user?.id.split(':')[0] || null;
                 this.updateDevice(deviceId, { status: 'CONNECTED', phoneNumber, qr: null });
+            }
+        });
+
+        sock.ev.on('messaging-history.set', ({ chats, contacts, messages }) => {
+            const store = stores.get(deviceId);
+            if (!store) return;
+
+            if (Array.isArray(contacts)) {
+                for (const c of contacts as any[]) {
+                    const id = String(c?.id || '');
+                    const name = String(c?.name || c?.notify || '').trim();
+                    if (id && name) store.contacts.set(id, name);
+                }
+            }
+
+            if (Array.isArray(chats)) {
+                for (const ch of chats as any[]) {
+                    const id = String(ch?.id || '');
+                    if (!id) continue;
+                    const tsSec = Number(ch?.conversationTimestamp || ch?.lastMessageRecvTimestamp || 0);
+                    const ts = Number.isFinite(tsSec) && tsSec > 0 ? tsSec * 1000 : Date.now();
+                    const name = String(ch?.name || store.contacts.get(id) || '').trim() || id.split('@')[0];
+                    const canonical = resolveCanonicalChatId(store, id);
+                    if (canonical !== id) mergeChatData(store, id, canonical);
+                    const existing = store.chats.get(canonical) || { id: canonical, name, conversationTimestamp: ts, unreadCount: 0 };
+                    existing.name = existing.name || name;
+                    existing.conversationTimestamp = Math.max(Number(existing.conversationTimestamp || 0), ts);
+                    const unread = Number(ch?.unreadCount || 0);
+                    if (Number.isFinite(unread) && unread > 0) existing.unreadCount = Math.max(Number(existing.unreadCount || 0), unread);
+                    store.chats.set(canonical, existing);
+                }
+            }
+
+            if (Array.isArray(messages)) {
+                for (const m of messages as any[]) {
+                    this.upsertHistoryMessage(deviceId, store, m);
+                }
             }
         });
 
