@@ -78,6 +78,8 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [showSearchModal, setShowSearchModal] = useState(false);
+    const [pendingScrollMsgId, setPendingScrollMsgId] = useState<string | null>(null);
+    const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
     const [templates, setTemplates] = useState<{id: string, shortcut: string, content: string}[]>([]);
     const [showPairingModal, setShowPairingModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -187,27 +189,28 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
 
     // Cargar mensajes cuando se selecciona un chat
     useEffect(() => {
-        const fetchMessages = async () => {
-            if (!activeChat) return;
-
-            try {
-                const res = await apiFetch(`/api/devices/${device.id}/chats/${activeChat}/messages`);
-                const data = await res.json();
-                setMessages(data);
-
-                // Scroll to bottom
-                setTimeout(() => {
-                    if (scrollRef.current) {
-                        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-                    }
-                }, 100);
-            } catch (error) {
-                console.error('Error al cargar mensajes:', error);
-            }
-        };
-
-        fetchMessages();
+        if (!activeChat) return;
+        void loadMessages(activeChat);
     }, [activeChat, device.id]);
+
+    useEffect(() => {
+        if (!pendingScrollMsgId) return;
+        const id = pendingScrollMsgId;
+        const el = document.getElementById(`msg-${id}`);
+        if (!el) {
+            if (messages.length > 0) {
+                setPendingScrollMsgId(null);
+                messageApi.info('Resultado encontrado, pero no está en los últimos mensajes cargados');
+            }
+            return;
+        }
+        try {
+            el.scrollIntoView({ block: 'center' });
+        } catch {}
+        setPendingScrollMsgId(null);
+        setHighlightMsgId(id);
+        window.setTimeout(() => setHighlightMsgId((cur) => (cur === id ? null : cur)), 1500);
+    }, [messages, pendingScrollMsgId]);
 
     // Sonido de notificación simple (beep suave)
     const playNotificationSound = (toneId: number = selectedTone) => {
@@ -501,9 +504,11 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
             setShowSearchModal(true);
 
             try {
-                const res = await fetch(
-                    `/api/devices/${device.id}/messages/search?q=${encodeURIComponent(query)}&limit=30`
-                );
+                const params = new URLSearchParams();
+                params.set('q', query);
+                params.set('limit', '30');
+                if (activeChat) params.set('chatId', activeChat);
+                const res = await apiFetch(`/api/devices/${device.id}/messages/search?${params.toString()}`);
                 const data = await res.json();
 
                 if (Array.isArray(data)) {
@@ -521,11 +526,32 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
     };
 
     const goToSearchResult = (result: SearchResult) => {
-        setActiveChat(result.chatId);
+        const targetChatId = result.chatId;
+        setPendingScrollMsgId(result.id);
+        setActiveChat(targetChatId);
+        if (targetChatId === activeChat) {
+            void loadMessages(targetChatId);
+        }
         setShowSearchModal(false);
         setSearchQuery('');
         setSearchResults([]);
         // Los mensajes se cargarán automáticamente por el useEffect
+    };
+
+    const loadMessages = async (chatId: string) => {
+        if (!chatId) return;
+        try {
+            const res = await apiFetch(`/api/devices/${device.id}/chats/${chatId}/messages`);
+            const data = await res.json();
+            setMessages(Array.isArray(data) ? data : []);
+            setTimeout(() => {
+                if (scrollRef.current) {
+                    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                }
+            }, 100);
+        } catch (error) {
+            console.error('Error al cargar mensajes:', error);
+        }
     };
 
     const sendMessage = async () => {
@@ -968,7 +994,7 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                                     }}
                                 />
                             )}
-                            placeholder="Buscar mensajes..."
+                            placeholder={activeChat ? "Buscar mensajes en este chat..." : "Buscar mensajes..."}
                             value={searchQuery}
                             onChange={(e) => handleSearch(e.target.value)}
                             style={{ borderRadius: '8px', background: '#202c33', color: '#d1d7db', border: 'none', flex: 1 }}
@@ -1096,7 +1122,10 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                         >
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {messages.map((m, i) => (
-                                    <div key={i} style={{
+                                    <div
+                                        key={m.id || i}
+                                        id={m.id ? `msg-${m.id}` : undefined}
+                                        style={{
                                         alignSelf: m.fromMe ? 'flex-end' : 'flex-start',
                                         background: m.fromMe ? (m.source === 'panel' ? '#005c4b' : '#1f3b2f') : '#202c33',
                                         padding: '5px',
@@ -1104,8 +1133,10 @@ export const ChatInterface = ({ device, onClose }: { device: Device; onClose?: (
                                         color: '#e9edef',
                                         maxWidth: '70%',
                                         boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)',
-                                        position: 'relative'
-                                    }}>
+                                        position: 'relative',
+                                        outline: highlightMsgId && m.id === highlightMsgId ? '2px solid #25D366' : undefined
+                                    }}
+                                    >
                                         {m.location && Number.isFinite(m.location.latitude) && Number.isFinite(m.location.longitude) && (
                                             <div
                                                 style={{
