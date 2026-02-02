@@ -600,6 +600,9 @@ app.post('/api/devices/:id/chats/:chatId/send-text', async (req, res) => {
     try {
         const { text, quotedMessageId } = req.body;
         const actor = (req as any).auth?.user;
+        
+        console.log(`[send-text] deviceId=${req.params.id}, chatId=${req.params.chatId}, quotedMessageId=${quotedMessageId || 'none'}`);
+        
         const result = await deviceManager.sendMessage(req.params.id, req.params.chatId, text, quotedMessageId);
         recordOutgoingMessage(actor?.id || '', req.params.id, req.params.chatId, Date.now());
         audit(req, 'message_send_text', null, { 
@@ -610,6 +613,7 @@ app.post('/api/devices/:id/chats/:chatId/send-text', async (req, res) => {
         });
         res.json({ success: true, result });
     } catch (error: any) {
+        console.error(`[send-text] Error:`, error);
         res.status(500).json({ error: error.message });
     }
 });

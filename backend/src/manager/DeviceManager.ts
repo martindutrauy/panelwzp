@@ -1838,6 +1838,9 @@ export class DeviceManager {
         const targetJid = canonicalChatId;
 
         console.log(`[${deviceId}] Enviando mensaje a ${targetJid}: ${text.substring(0, 50)}...`);
+        if (quotedMessageId) {
+            console.log(`[${deviceId}] Con respuesta a mensaje: ${quotedMessageId}`);
+        }
 
         try {
             this.rememberPanelSend(deviceId, targetJid, { text, timestamp: Date.now() });
@@ -1846,15 +1849,32 @@ export class DeviceManager {
             const messageContent: any = { text };
             
             // Si hay quotedMessageId, buscar el mensaje original y agregar contextInfo
-            if (quotedMessageId && store) {
+            if (quotedMessageId) {
                 const originalMsg = this.findMessageById(deviceId, canonicalChatId, quotedMessageId);
-                if (originalMsg) {
+                console.log(`[${deviceId}] Mensaje original encontrado:`, originalMsg ? 'SÍ' : 'NO');
+                
+                if (originalMsg && originalMsg.message) {
+                    // Determinar el participante correcto
+                    const participant = originalMsg.key?.participant || originalMsg.key?.remoteJid || targetJid;
+                    
                     messageContent.contextInfo = {
                         quotedMessage: originalMsg.message,
                         stanzaId: quotedMessageId,
-                        participant: originalMsg.key?.participant || originalMsg.key?.remoteJid
+                        participant: participant
                     };
-                    console.log(`[${deviceId}] Respondiendo a mensaje ${quotedMessageId}`);
+                    console.log(`[${deviceId}] contextInfo configurado - stanzaId: ${quotedMessageId}, participant: ${participant}`);
+                } else if (originalMsg) {
+                    // Si no tiene .message pero existe, intentar construir uno básico
+                    console.log(`[${deviceId}] Mensaje encontrado pero sin .message, intentando con texto`);
+                    if (originalMsg.text) {
+                        messageContent.contextInfo = {
+                            quotedMessage: { conversation: originalMsg.text },
+                            stanzaId: quotedMessageId,
+                            participant: originalMsg.key?.participant || originalMsg.key?.remoteJid || targetJid
+                        };
+                    }
+                } else {
+                    console.log(`[${deviceId}] No se encontró el mensaje original ${quotedMessageId} - enviando sin quote`);
                 }
             }
             
@@ -1869,18 +1889,39 @@ export class DeviceManager {
         }
     }
     
-    // Buscar mensaje por ID en el store
+    // Buscar mensaje por ID en el store (memoria)
     private findMessageById(deviceId: string, chatId: string, messageId: string): any | null {
         const store = stores.get(deviceId);
-        if (!store) return null;
+        if (!store) {
+            console.log(`[${deviceId}] findMessageById: store no encontrado`);
+            return null;
+        }
         
-        const messages = store.messages.get(chatId) || [];
+        // Buscar en el chatId dado
+        let messages = store.messages.get(chatId) || [];
+        console.log(`[${deviceId}] findMessageById: buscando ${messageId} en ${chatId} (${messages.length} mensajes)`);
+        
         for (const msg of messages) {
             const id = msg.key?.id || msg.id;
             if (id === messageId) {
+                console.log(`[${deviceId}] findMessageById: encontrado en ${chatId}`);
                 return msg;
             }
         }
+        
+        // Si no se encontró, buscar en todos los chats (por si hay alias)
+        for (const [cid, msgs] of store.messages.entries()) {
+            if (cid === chatId) continue; // Ya lo buscamos
+            for (const msg of msgs) {
+                const id = msg.key?.id || msg.id;
+                if (id === messageId) {
+                    console.log(`[${deviceId}] findMessageById: encontrado en chat alternativo ${cid}`);
+                    return msg;
+                }
+            }
+        }
+        
+        console.log(`[${deviceId}] findMessageById: mensaje ${messageId} NO encontrado`);
         return null;
     }
 

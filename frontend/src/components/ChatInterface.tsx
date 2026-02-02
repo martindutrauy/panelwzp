@@ -788,6 +788,7 @@ export const ChatInterface = ({
         try {
             const res = await apiFetch(`/api/devices/${device.id}/chats/${chatId}/messages`);
             const data = await res.json();
+            console.log('[loadMessages] Mensajes cargados:', data.length, 'ejemplo:', data[0]);
             setMessages(Array.isArray(data) ? data : []);
             setTimeout(() => {
                 if (scrollRef.current) {
@@ -1523,7 +1524,10 @@ export const ChatInterface = ({
                                                     key: 'reply', 
                                                     label: 'Responder',
                                                     icon: <span style={{ marginRight: 8 }}>↩️</span>,
-                                                    onClick: () => setReplyingTo(m) 
+                                                    onClick: () => {
+                                                        console.log('[Reply] Mensaje seleccionado:', { id: m.id, text: m.text?.substring(0, 30), senderName: m.senderName, fromMe: m.fromMe });
+                                                        setReplyingTo(m);
+                                                    }
                                                 },
                                                 { 
                                                     key: 'copy', 
