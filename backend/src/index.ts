@@ -84,7 +84,8 @@ const upload = multer({
 });
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+// Express v5 + path-to-regexp no acepta '*' como ruta
+app.options(/.*/, cors(corsOptions));
 app.use(express.json());
 ensureDir(DB_ROOT);
 app.use('/storage', express.static(path.join(DB_ROOT, 'storage')));
