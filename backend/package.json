@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "start:prod": "node dist/index.js",
     "prisma:generate": "prisma generate",
-    "prisma:push": "prisma db push"
+    "prisma:push": "prisma db push",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy"
   },
   "files": [
     "dist",

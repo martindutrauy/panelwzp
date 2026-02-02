@@ -3,3 +3,9 @@ node_modules
 .env
 
 /generated/prisma
+
+# Prisma v7 config is TS; avoid committing compiled artifacts
+prisma.config.js
+prisma.config.js.map
+prisma.config.d.ts
+prisma.config.d.ts.map

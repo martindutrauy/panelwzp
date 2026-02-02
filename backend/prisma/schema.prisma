@@ -6,8 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "mysql"
 }
 
 model Device {
@@ -27,9 +26,11 @@ model Chat {
   device          Device   @relation(fields: [deviceId], references: [id])
   waChatId        String   // WhatsApp JID
   name            String?
+  isGroup         Boolean  @default(false)
   unreadCount     Int      @default(0)
   priorityScore   Int      @default(0)
   lastMessageAt   DateTime @default(now())
+  profilePhotoUrl String?
   messages        Message[]
 
   @@unique([deviceId, waChatId])
@@ -45,11 +46,11 @@ model Message {
   fromMe          Boolean
   source          String   @default("whatsapp") // panel, whatsapp
   type            String   @default("text") // text, audio, image, video, document
-  text            String?
+  text            String?  @db.LongText
   mediaPath       String?
   timestamp       DateTime @default(now())
   status          String   @default("sent") // sent, delivered, read, failed
-  rawJson         String?
+  rawJson         String?  @db.LongText
 }
 
 model RetentionPolicy {

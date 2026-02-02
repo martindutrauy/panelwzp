@@ -18,6 +18,7 @@ Este documento describe el proceso completo para desplegar este proyecto en Rail
 
 ### Backend (service del backend)
 
+- `DATABASE_URL`: **obligatoria**. Cadena de conexión a MySQL (la crea Railway si agregás un servicio MySQL, o la podés setear manualmente).
 - `OWNER_USERNAME`: usuario del propietario (ej: `admin`)
 - `OWNER_PASSWORD`: contraseña del propietario (fuerte). No se cambia desde la UI
 - `OWNER_EMAIL` (opcional): email del propietario (para referencia)
@@ -37,7 +38,7 @@ Persistencia:
   - `devices.json` (sucursales/dispositivos)
   - `storage/` (archivos)
   - `auth/<deviceId>/` (sesiones Baileys)
-  - `messages/` (base propia del panel: backup de mensajes por sucursal)
+  - `messages/` (backup local legacy; la **fuente de verdad** de chats/mensajes es MySQL cuando `DATABASE_URL` está seteada)
   - `security/owner.json` (estado OWNER: emergency lock/token version)
   - `security/users.json` (usuarios ADMIN/USER)
   - `security/sessions.json` (sesiones del panel)
@@ -64,8 +65,9 @@ Nota: en Vite las variables `VITE_*` se “pegan” al compilar. Si las cambiás
    - **Root Directory / Service Path**: `backend`
 3. En **Settings** configurar comandos:
    - **Build Command**: `npm ci && npm run build`
-   - **Start Command**: `npm run start:prod`
+   - **Start Command**: `npm run prisma:migrate:deploy && npm run start:prod`
 4. En **Variables** del backend, agregar:
+   - `DATABASE_URL`
    - `OWNER_USERNAME`
    - `OWNER_PASSWORD`
    - `APP_AUTH_SECRET`
@@ -83,6 +85,15 @@ Objetivo: que la sesión de WhatsApp y los archivos no se pierdan al redeploy.
 Notas:
 - Si existe volumen, Railway inyecta `RAILWAY_VOLUME_MOUNT_PATH` y el backend lo usa automáticamente.
 - En la práctica, la sesión debe permanecer `CONNECTED` después de redeploy.
+
+### 3.1) MySQL (recomendado/obligatorio para chats)
+
+Objetivo: que **los chats y mensajes no se pierdan** y no haya inconsistencias.
+
+1. En Railway, agregar un servicio **MySQL** al proyecto.
+2. Copiar la cadena de conexión (connection string) y setearla como variable del **backend**:
+   - `DATABASE_URL=...`
+3. Redeploy del backend. En el arranque se ejecuta `prisma migrate deploy` automáticamente.
 
 ### 4) Frontend: crear service apuntando a `frontend/`
 
