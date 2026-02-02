@@ -33,8 +33,12 @@ export function getPrisma(): PrismaClient | null {
         return null;
     }
     if (!prisma) {
-        // Con `url = env("DATABASE_URL")` en schema.prisma, no necesitamos overrides acá.
-        prisma = new PrismaClient();
+        // Prisma v7 con engineType=binary: podemos inyectar la URL en runtime de forma explícita.
+        prisma = new PrismaClient({
+            datasources: {
+                db: { url }
+            }
+        });
     }
     return prisma;
 }
