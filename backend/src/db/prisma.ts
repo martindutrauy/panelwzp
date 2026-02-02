@@ -38,17 +38,14 @@ export function getPrisma(): PrismaClient | null {
         // Usamos el adapter oficial basado en el driver `mariadb`.
         const u = new URL(url);
         const database = String(u.pathname || '').replace(/^\//, '');
-        const adapter = new PrismaMariaDb(
-            {
-                host: u.hostname,
-                port: u.port ? Number(u.port) : 3306,
-                user: decodeURIComponent(u.username || ''),
-                password: decodeURIComponent(u.password || ''),
-                database,
-                connectionLimit: Number(process.env.DB_POOL_SIZE || 10)
-            },
-            database ? { schema: database } : undefined
-        );
+        const adapter = new PrismaMariaDb({
+            host: u.hostname,
+            port: u.port ? Number(u.port) : 3306,
+            user: decodeURIComponent(u.username || ''),
+            password: decodeURIComponent(u.password || ''),
+            database,
+            connectionLimit: Number(process.env.DB_POOL_SIZE || 10)
+        });
         prisma = new PrismaClient({ adapter });
     }
     return prisma;
