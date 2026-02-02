@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification } from 'antd';
-import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall } from 'lucide-react';
+import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { useSocket } from '../hooks/useSocket';
 import { apiFetch, assetUrl } from '../lib/runtime';
@@ -47,6 +47,10 @@ interface Chat {
     unreadCount: number;
     isGroup: boolean;
     profilePhotoUrl?: string | null;
+    lastMessage?: string | null;
+    lastMessageType?: string;
+    lastMessageFromMe?: boolean;
+    lastMessageMedia?: { mimeType?: string; duration?: number } | null;
 }
 
 interface SearchResult {
@@ -116,6 +120,88 @@ export const ChatInterface = ({
         if (chatId.includes('@g.us')) return chatId;
         const prefix = chatId.split('@')[0] || chatId;
         return prefix.split(':')[0] || prefix;
+    };
+
+    // Formatear duración de audio (segundos -> mm:ss)
+    const formatAudioDuration = (seconds?: number) => {
+        if (!seconds || !Number.isFinite(seconds)) return '';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // Renderizar preview del último mensaje estilo WhatsApp
+    const renderLastMessagePreview = (chat: Chat) => {
+        const prefix = chat.lastMessageFromMe ? (
+            <CheckCheck size={14} color="#53bdeb" style={{ marginRight: 4, flexShrink: 0 }} />
+        ) : null;
+
+        // Si es un grupo, mostrar ícono de grupo
+        if (chat.isGroup && !chat.lastMessage && !chat.lastMessageMedia) {
+            return <span>👥 Grupo</span>;
+        }
+
+        // Si hay media
+        if (chat.lastMessageMedia?.mimeType) {
+            const mimeType = chat.lastMessageMedia.mimeType.toLowerCase();
+            
+            if (mimeType.startsWith('audio/')) {
+                const duration = formatAudioDuration(chat.lastMessageMedia.duration);
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Mic size={14} color="#25D366" style={{ flexShrink: 0 }} />
+                        <span style={{ color: '#25D366' }}>
+                            {duration ? duration : 'Audio'}
+                        </span>
+                    </span>
+                );
+            }
+            
+            if (mimeType.startsWith('image/')) {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Camera size={14} style={{ flexShrink: 0 }} />
+                        <span>{chat.lastMessage || 'Foto'}</span>
+                    </span>
+                );
+            }
+            
+            if (mimeType.startsWith('video/')) {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Video size={14} style={{ flexShrink: 0 }} />
+                        <span>{chat.lastMessage || 'Video'}</span>
+                    </span>
+                );
+            }
+            
+            // Documento u otro tipo de archivo
+            return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {prefix}
+                    <FileText size={14} style={{ flexShrink: 0 }} />
+                    <span>{chat.lastMessage || 'Documento'}</span>
+                </span>
+            );
+        }
+
+        // Mensaje de texto normal
+        if (chat.lastMessage) {
+            return (
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                    {prefix}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {chat.lastMessage}
+                    </span>
+                </span>
+            );
+        }
+
+        // Sin mensaje - mostrar tipo de chat
+        return <span>{chat.isGroup ? '👥 Grupo' : 'Chat'}</span>;
     };
 
     useEffect(() => {
@@ -1082,9 +1168,9 @@ export const ChatInterface = ({
                                             </div>
                                         }
                                         description={
-                                            <Text ellipsis style={{ color: '#8696a0', fontSize: '13px' }}>
-                                                {chat.isGroup ? '👥 Grupo' : 'Chat privado'}
-                                            </Text>
+                                            <div style={{ color: '#8696a0', fontSize: '13px', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                                                {renderLastMessagePreview(chat)}
+                                            </div>
                                         }
                                     />
                                 </List.Item>

@@ -2022,18 +2022,76 @@ export class DeviceManager {
         try {
             const prisma = getPrisma();
             if (prisma) {
+                // Obtener chats con su último mensaje
                 const rows = await prisma.chat.findMany({
                     where: { deviceId },
-                    orderBy: { lastMessageAt: 'desc' }
+                    orderBy: { lastMessageAt: 'desc' },
+                    include: {
+                        messages: {
+                            orderBy: { timestamp: 'desc' },
+                            take: 1,
+                            select: {
+                                text: true,
+                                fromMe: true,
+                                type: true,
+                                mediaPath: true,
+                                rawJson: true
+                            }
+                        }
+                    }
                 });
-                return rows.map((c: any) => ({
-                    id: c.waChatId,
-                    name: String(c.name || '').trim() || c.waChatId.split('@')[0],
-                    lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now(),
-                    unreadCount: Number(c.unreadCount || 0),
-                    isGroup: Boolean(c.isGroup),
-                    profilePhotoUrl: c.profilePhotoUrl || null
-                }));
+                return rows.map((c: any) => {
+                    const lastMsg = c.messages?.[0];
+                    let lastMessageText: string | null = null;
+                    let lastMessageType: string = 'text';
+                    let lastMessageFromMe: boolean = false;
+                    let lastMessageMedia: { mimeType?: string; duration?: number } | null = null;
+
+                    if (lastMsg) {
+                        lastMessageText = lastMsg.text;
+                        lastMessageType = lastMsg.type || 'text';
+                        lastMessageFromMe = Boolean(lastMsg.fromMe);
+                        
+                        // Extraer duración del audio si existe
+                        if (lastMsg.rawJson) {
+                            try {
+                                const raw = JSON.parse(lastMsg.rawJson);
+                                if (raw?.media?.mimeType) {
+                                    lastMessageMedia = { mimeType: raw.media.mimeType };
+                                    // Intentar extraer duración del audio
+                                    if (raw.media.duration) {
+                                        lastMessageMedia.duration = raw.media.duration;
+                                    }
+                                }
+                            } catch {}
+                        }
+                        
+                        // Inferir tipo de media del path si no hay rawJson
+                        if (!lastMessageMedia && lastMsg.mediaPath) {
+                            const ext = String(lastMsg.mediaPath).split('.').pop()?.toLowerCase();
+                            if (['ogg', 'mp3', 'wav', 'webm', 'm4a', 'opus'].includes(ext || '')) {
+                                lastMessageMedia = { mimeType: 'audio/' + ext };
+                            } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
+                                lastMessageMedia = { mimeType: 'image/' + ext };
+                            } else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext || '')) {
+                                lastMessageMedia = { mimeType: 'video/' + ext };
+                            }
+                        }
+                    }
+
+                    return {
+                        id: c.waChatId,
+                        name: String(c.name || '').trim() || c.waChatId.split('@')[0],
+                        lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now(),
+                        unreadCount: Number(c.unreadCount || 0),
+                        isGroup: Boolean(c.isGroup),
+                        profilePhotoUrl: c.profilePhotoUrl || null,
+                        lastMessage: lastMessageText,
+                        lastMessageType,
+                        lastMessageFromMe,
+                        lastMessageMedia
+                    };
+                });
             }
 
             // Obtener store del dispositivo
@@ -2079,13 +2137,40 @@ export class DeviceManager {
                 const displayName = String(contactName || '').trim() || canonicalId.split('@')[0];
                 const lastMessageTime = entry.lastMessageTime || Date.now();
                 const profilePhotoUrl = store.profilePhotos.get(canonicalId)?.url || null;
+                
+                // Obtener último mensaje del store
+                const chatMessages = store.messages.get(canonicalId) || [];
+                const lastMsg = chatMessages.length > 0 ? chatMessages[chatMessages.length - 1] : null;
+                
+                let lastMessage: string | null = null;
+                let lastMessageType: string = 'text';
+                let lastMessageFromMe: boolean = false;
+                let lastMessageMedia: { mimeType?: string; duration?: number } | null = null;
+                
+                if (lastMsg) {
+                    lastMessage = lastMsg.text || null;
+                    lastMessageFromMe = Boolean(lastMsg.fromMe);
+                    
+                    if (lastMsg.media) {
+                        lastMessageType = lastMsg.media.mimeType?.split('/')[0] || 'file';
+                        lastMessageMedia = { 
+                            mimeType: lastMsg.media.mimeType,
+                            duration: lastMsg.media.duration
+                        };
+                    }
+                }
+                
                 return {
                     id: canonicalId,
                     name: displayName,
                     lastMessageTime,
                     unreadCount: entry.unreadCount || 0,
                     isGroup: canonicalId.endsWith('@g.us'),
-                    profilePhotoUrl
+                    profilePhotoUrl,
+                    lastMessage,
+                    lastMessageType,
+                    lastMessageFromMe,
+                    lastMessageMedia
                 };
             });
 
