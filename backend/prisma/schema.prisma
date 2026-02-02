@@ -2,13 +2,13 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  // Prisma ORM v7: fijamos engine Rust (estable en Railway) para evitar
-  // requerir driver adapters/Accelerate en runtime.
+  // Prisma ORM v7: cliente "no-rust" + driver adapter (recomendado).
   provider   = "prisma-client"
-  engineType = "binary"
-  // Requerido por `prisma-client`. Ruta relativa a este directorio (`prisma/`).
-  // Importaremos desde `../generated/prisma/client`.
-  output     = "../generated/prisma"
+  engineType = "client"
+  // Requerido por `prisma-client`. Lo generamos dentro de `src/` para que TS lo compile
+  // sin errores de rootDir en Railway.
+  // Ruta relativa a este directorio (`prisma/`).
+  output     = "../src/generated/prisma"
 }
 
 datasource db {

@@ -34,11 +34,13 @@
   },
   "dependencies": {
     "@prisma/client": "^7.2.0",
+    "@prisma/adapter-mariadb": "^7.2.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "ffmpeg-static": "^5.2.0",
+    "mariadb": "^3.4.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "pino": "^10.1.0",
