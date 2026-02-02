@@ -16,6 +16,9 @@ desktop/dist-win2/
 *.blockmap
 
 db/
+# PERMITIR código del backend (no confundir con la carpeta db/ de datos)
+!backend/src/db/
+!backend/src/db/**
 backup-*/
 .trae/
 .vercel/
