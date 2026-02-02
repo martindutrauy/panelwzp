@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Button, Badge, Space, Tabs, Popconfirm, message, Typography } from 'antd';
-import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings, Lock } from 'lucide-react';
+import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { BranchCard } from './BranchCard';
 import { FilePanel } from './FilePanel';
@@ -9,7 +9,6 @@ import { StatsPanel } from './StatsPanel';
 import { apiFetch } from '../lib/runtime';
 import { PairingCodeModal } from './PairingCodeModal';
 import { BranchNotificationsModal } from './BranchNotificationsModal';
-import { GlobalSecurityModal } from './GlobalSecurityModal';
 import { useSocket } from '../hooks/useSocket';
 import { notifyIncomingMessage } from '../services/notificationDispatcher.service';
 import { getBranchChatName } from '../services/branchChatDirectory.service';
@@ -32,7 +31,6 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
     const [devices, setDevices] = useState<Device[]>([]);
     const [currentDeviceIndex, setCurrentDeviceIndex] = useState<number | null>(null); // null = ningún dispositivo seleccionado
     const [showBranchNotifications, setShowBranchNotifications] = useState(false);
-    const [showGlobalSecurity, setShowGlobalSecurity] = useState(false);
     const [pinnedDevices, setPinnedDevices] = useState<string[]>(() => {
         const saved = localStorage.getItem('pinnedDevices');
         const parsed = saved ? JSON.parse(saved) : [];
@@ -463,9 +461,6 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
                         <Badge count={connectedCount} style={{ backgroundColor: '#00a884' }} />
                     </Space>
                     <Space>
-                        <Button icon={<Lock size={16} />} onClick={() => setShowGlobalSecurity(true)}>
-                            Seguridad
-                        </Button>
                         <Button type="primary" icon={<Plus size={16} />} onClick={addDevice}>
                             Agregar
                         </Button>
@@ -581,7 +576,6 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
                 deviceId={pairingDeviceId || ''}
                 onClose={() => setPairingDeviceId(null)}
             />
-            <GlobalSecurityModal open={showGlobalSecurity} onClose={() => setShowGlobalSecurity(false)} />
         </Modal>
         </>
     );

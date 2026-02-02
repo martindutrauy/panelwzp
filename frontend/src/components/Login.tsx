@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Button, Card, Input, Typography, message } from 'antd';
 import { apiFetch } from '../lib/runtime';
-import { setAuthToken } from '../lib/auth';
+import { setAuthToken, setAuthUser } from '../lib/auth';
 
 export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
     const [username, setUsername] = useState('admin');
     const [password, setPassword] = useState('');
+    const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [messageApi, contextHolder] = message.useMessage();
 
@@ -15,13 +16,21 @@ export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
             const res = await apiFetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, otp: otp.trim() || undefined })
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(String(data?.error || 'Error al iniciar sesión'));
             const token = String(data?.token || '');
             if (!token) throw new Error('Token inválido');
             setAuthToken(token);
+            if (data?.user?.id && data?.user?.username && data?.user?.role) {
+                setAuthUser({
+                    id: String(data.user.id),
+                    username: String(data.user.username),
+                    email: data.user.email ? String(data.user.email) : null,
+                    role: String(data.user.role).toUpperCase() as any
+                });
+            }
             onLoggedIn();
         } catch (error: any) {
             messageApi.error(String(error?.message || 'Error al iniciar sesión'));
@@ -51,6 +60,13 @@ export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
                         autoComplete="current-password"
                         onPressEnter={submit}
                     />
+                    <Input
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value)}
+                        placeholder="Código 2FA (si aplica)"
+                        autoComplete="one-time-code"
+                        onPressEnter={submit}
+                    />
                     <Button type="primary" loading={loading} onClick={submit}>
                         Entrar
                     </Button>
@@ -59,4 +75,3 @@ export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
         </div>
     );
 };
-

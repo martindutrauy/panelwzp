@@ -11,7 +11,15 @@ import path from 'path';
 import fs from 'fs';
 import { DB_ROOT } from './config/paths';
 import { ensureDir } from './config/ensureDir';
-import { changePassword, signAuthToken, verifyAuthToken, verifyCredentials } from './auth/appAuth';
+import { requireAuth } from './auth/middleware';
+import { audit, requireRoleAtLeast } from './auth/middleware';
+import { createSession, findSession, listSessions, revokeAllSessions, revokeAllSessionsExcept, revokeAllSessionsForUser, revokeSession } from './auth/sessionStore';
+import { signAuthToken, verifyAuthToken } from './auth/authToken';
+import { getOwnerPassword, getOwnerTwoFactorSecret, getOwnerUser, isOwnerUsername, loadOwnerState, rotateOwnerTokenVersion, setEmergencyLock, setOwnerTwoFactorSecret } from './auth/ownerStore';
+import { createUser, findUserById, findUserByLogin, getUserPublic, getUserTwoFactorSecret, listUsers, rotateUserTokenVersion, setUserDisabled, setUserPasswordHash, setUserRole, setUserTwoFactorSecret } from './auth/userStore';
+import { hashPassword, validatePasswordPolicy, verifyPassword } from './auth/passwords';
+import { buildOtpauthUrl, generateTotpSecret, verifyTotpCode } from './auth/totp';
+import { appendAuditEvent, readAuditTail } from './auth/auditLog';
 
 const parseAllowedOrigins = (): string[] | '*' | null => {
     const raw = String(process.env.APP_CORS_ORIGINS || '').trim();
@@ -38,6 +46,12 @@ const io = new Server(server, {
     cors: { origin: allowedOrigins === '*' || !allowedOrigins ? '*' : allowedOrigins }
 });
 
+const notifyOwner = (event: any) => {
+    try {
+        io.to('role:OWNER').emit('security:event', event);
+    } catch {}
+};
+
 const deviceManager = DeviceManager.getInstance();
 const templateManager = TemplateManager.getInstance();
 const labelManager = LabelManager.getInstance();
@@ -54,41 +68,321 @@ app.use(express.json());
 ensureDir(DB_ROOT);
 app.use('/storage', express.static(path.join(DB_ROOT, 'storage')));
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, password } = req.body || {};
-        if (!verifyCredentials(String(username || ''), String(password || ''))) {
-            return res.status(401).json({ error: 'Credenciales inválidas' });
+        const { username, password, otp } = req.body || {};
+        const login = String(username || '').trim();
+        const pass = String(password || '');
+        if (!login || !pass) return res.status(400).json({ error: 'Credenciales inválidas' });
+
+        const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0]?.trim() || (req.socket?.remoteAddress ? String(req.socket.remoteAddress) : null);
+        const userAgent = String(req.headers['user-agent'] || '').trim() || null;
+
+        if (isOwnerUsername(login)) {
+            const ownerPass = getOwnerPassword();
+            if (!ownerPass) return res.status(500).json({ error: 'OWNER_PASSWORD no configurada' });
+            if (pass !== ownerPass) {
+                return res.status(401).json({ error: 'Credenciales inválidas' });
+            }
+            const secret = getOwnerTwoFactorSecret();
+            if (secret && !verifyTotpCode(secret, String(otp || ''))) {
+                return res.status(401).json({ error: 'Código 2FA inválido', code: 'OTP_INVALID' });
+            }
+            const owner = getOwnerUser();
+            const session = createSession(owner.id, ip, userAgent);
+            const token = signAuthToken({ sub: owner.id, r: owner.role, sid: session.id, tv: owner.tokenVersion });
+            appendAuditEvent({
+                actorUserId: owner.id,
+                actorRole: owner.role,
+                action: 'login',
+                targetUserId: null,
+                ip,
+                userAgent,
+                meta: { role: owner.role }
+            });
+            return res.json({ token, user: { id: owner.id, username: owner.username, email: owner.email, role: owner.role } });
         }
-        const token = signAuthToken(String(username));
-        res.json({ token, username: String(username) });
+
+        const stored = findUserByLogin(login);
+        if (!stored) return res.status(401).json({ error: 'Credenciales inválidas' });
+        if (stored.disabled) return res.status(403).json({ error: 'Usuario desactivado' });
+        const okPass = await verifyPassword(pass, stored.passwordHash);
+        if (!okPass) return res.status(401).json({ error: 'Credenciales inválidas' });
+        const pub = getUserPublic(stored);
+        if (pub.role === 'ADMIN' && stored.twoFactorSecretEnc) {
+            const secret = getUserTwoFactorSecret(stored);
+            if (secret && !verifyTotpCode(secret, String(otp || ''))) {
+                return res.status(401).json({ error: 'Código 2FA inválido', code: 'OTP_INVALID' });
+            }
+        }
+
+        const session = createSession(pub.id, ip, userAgent);
+        const token = signAuthToken({ sub: pub.id, r: pub.role, sid: session.id, tv: pub.tokenVersion });
+        appendAuditEvent({
+            actorUserId: pub.id,
+            actorRole: pub.role,
+            action: 'login',
+            targetUserId: null,
+            ip,
+            userAgent,
+            meta: { role: pub.role }
+        });
+        return res.json({ token, user: { id: pub.id, username: pub.username, email: pub.email, role: pub.role } });
     } catch (error: any) {
         res.status(500).json({ error: error?.message || 'Error al iniciar sesión' });
     }
 });
 
 app.use('/api', (req, res, next) => {
-    if (req.method === 'OPTIONS') return next();
     if (req.path === '/auth/login') return next();
-
-    const auth = String(req.headers.authorization || '');
-    const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
-    const verified = verifyAuthToken(token);
-    if (!verified) return res.status(401).json({ error: 'No autorizado' });
-    (req as any).user = verified;
-    next();
+    return requireAuth(req, res, next);
 });
 
-app.post('/api/auth/change-password', (req, res) => {
+app.get('/api/auth/me', (req, res) => {
+    const u = (req as any).auth?.user;
+    if (!u) return res.status(401).json({ error: 'No autorizado' });
+    res.json({ id: u.id, username: u.username, email: u.email, role: u.role });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    const auth = (req as any).auth;
+    if (!auth?.sessionId) return res.status(401).json({ error: 'No autorizado' });
+    revokeSession(auth.sessionId, auth.user?.id || null, 'logout');
+    audit(req, 'logout', auth.user?.id || null);
+    res.json({ success: true });
+});
+
+app.post('/api/auth/change-password', async (req, res) => {
     try {
-        const user = (req as any).user as { username: string } | undefined;
-        if (!user?.username) return res.status(401).json({ error: 'No autorizado' });
+        const auth = (req as any).auth;
+        const u = auth?.user;
+        if (!u) return res.status(401).json({ error: 'No autorizado' });
+        if (u.role === 'OWNER') {
+            return res.status(400).json({ error: 'La contraseña del propietario del sistema no puede modificarse desde la interfaz web.' });
+        }
         const { currentPassword, newPassword } = req.body || {};
-        const result = changePassword(user.username, String(currentPassword || ''), String(newPassword || ''));
-        if (!result.ok) return res.status(400).json({ error: result.error });
-        return res.json({ success: true });
+        const stored = findUserById(u.id);
+        if (!stored) return res.status(401).json({ error: 'No autorizado' });
+        const ok = await verifyPassword(String(currentPassword || ''), stored.passwordHash);
+        if (!ok) return res.status(400).json({ error: 'Contraseña actual incorrecta' });
+        const policy = validatePasswordPolicy(String(newPassword || ''));
+        if (!policy.ok) return res.status(400).json({ error: policy.error });
+        const newHash = await hashPassword(String(newPassword || ''));
+        setUserPasswordHash(u.id, newHash);
+        revokeAllSessionsForUser(u.id, u.id, 'password_changed');
+        audit(req, 'password_changed', u.id);
+        notifyOwner({ action: 'password_changed', userId: u.id, by: u.id, at: Date.now() });
+        res.json({ success: true });
     } catch (error: any) {
         res.status(500).json({ error: error?.message || 'Error al cambiar contraseña' });
+    }
+});
+
+app.get('/api/security/audit', requireRoleAtLeast('ADMIN'), (req, res) => {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+    res.json(readAuditTail(limit));
+});
+
+app.get('/api/security/users', requireRoleAtLeast('ADMIN'), (req, res) => {
+    res.json({ users: listUsers() });
+});
+
+app.post('/api/security/users', requireRoleAtLeast('ADMIN'), async (req, res) => {
+    try {
+        const actor = (req as any).auth?.user;
+        const { username, email, role, password } = req.body || {};
+        const nextRole = String(role || 'USER').toUpperCase();
+        if (nextRole === 'OWNER') return res.status(400).json({ error: 'No se puede crear OWNER' });
+        if (nextRole === 'ADMIN' && actor?.role !== 'OWNER') return res.status(403).json({ error: 'Solo OWNER puede crear ADMIN' });
+        const policy = validatePasswordPolicy(String(password || ''));
+        if (!policy.ok) return res.status(400).json({ error: policy.error });
+        const passwordHash = await hashPassword(String(password || ''));
+        const created = createUser({ username: String(username || ''), email: email ? String(email) : null, role: nextRole === 'ADMIN' ? 'ADMIN' : 'USER', passwordHash });
+        audit(req, 'user_created', created.id, { role: created.role });
+        if (created.role === 'ADMIN') notifyOwner({ action: 'admin_created', userId: created.id, by: actor?.id || null, at: Date.now() });
+        res.json({ user: getUserPublic(created) });
+    } catch (error: any) {
+        res.status(400).json({ error: error?.message || 'Error al crear usuario' });
+    }
+});
+
+app.patch('/api/security/users/:id', requireRoleAtLeast('ADMIN'), (req, res) => {
+    try {
+        const actor = (req as any).auth?.user;
+        const targetId = String(req.params.id || '').trim();
+        if (!targetId) return res.status(400).json({ error: 'id requerido' });
+        const target = findUserById(targetId);
+        if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+        const { disabled, role } = req.body || {};
+        if (typeof disabled === 'boolean') {
+            if (actor?.role === 'ADMIN' && target.role !== 'USER') return res.status(403).json({ error: 'No permitido' });
+            const updated = setUserDisabled(targetId, Boolean(disabled));
+            if (!updated) return res.status(404).json({ error: 'Usuario no encontrado' });
+            audit(req, 'user_disabled_changed', targetId, { disabled: Boolean(disabled) });
+            return res.json({ user: getUserPublic(updated) });
+        }
+        if (typeof role === 'string') {
+            const nextRole = String(role || '').toUpperCase();
+            if (nextRole === 'OWNER') return res.status(400).json({ error: 'No se puede asignar OWNER' });
+            if (actor?.role !== 'OWNER') return res.status(403).json({ error: 'Solo OWNER puede cambiar roles' });
+            const updated = setUserRole(targetId, nextRole === 'ADMIN' ? 'ADMIN' : 'USER');
+            if (!updated) return res.status(404).json({ error: 'Usuario no encontrado' });
+            audit(req, 'user_role_changed', targetId, { role: updated.role });
+            notifyOwner({ action: 'role_changed', userId: targetId, by: actor?.id || null, at: Date.now(), role: updated.role });
+            return res.json({ user: getUserPublic(updated) });
+        }
+        return res.status(400).json({ error: 'Nada para actualizar' });
+    } catch (error: any) {
+        res.status(400).json({ error: error?.message || 'Error al actualizar usuario' });
+    }
+});
+
+app.post('/api/security/users/:id/reset-password', requireRoleAtLeast('ADMIN'), async (req, res) => {
+    try {
+        const actor = (req as any).auth?.user;
+        const targetId = String(req.params.id || '').trim();
+        const target = findUserById(targetId);
+        if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (actor?.role === 'ADMIN' && target.role !== 'USER') return res.status(403).json({ error: 'No permitido' });
+        const { newPassword } = req.body || {};
+        const policy = validatePasswordPolicy(String(newPassword || ''));
+        if (!policy.ok) return res.status(400).json({ error: policy.error });
+        const passwordHash = await hashPassword(String(newPassword || ''));
+        setUserPasswordHash(targetId, passwordHash);
+        revokeAllSessionsForUser(targetId, actor?.id || null, 'password_reset');
+        audit(req, 'password_reset', targetId);
+        notifyOwner({ action: 'password_reset', userId: targetId, by: actor?.id || null, at: Date.now() });
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(400).json({ error: error?.message || 'Error al resetear contraseña' });
+    }
+});
+
+app.get('/api/security/sessions', requireRoleAtLeast('USER'), (req, res) => {
+    const actor = (req as any).auth?.user;
+    const targetUserId = String(req.query?.userId || '').trim();
+    const filterUserId = targetUserId || null;
+    if (actor?.role === 'USER') {
+        const sessions = listSessions(actor.id);
+        return res.json({ sessions });
+    }
+    if (actor?.role === 'ADMIN' && filterUserId) {
+        const target = filterUserId === 'owner' ? null : findUserById(filterUserId);
+        if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (target.role !== 'USER' && actor.role !== 'OWNER') return res.status(403).json({ error: 'No permitido' });
+    }
+    if (actor?.role === 'ADMIN' && !filterUserId) {
+        const sessions = listSessions().filter((s) => s.userId !== 'owner');
+        return res.json({ sessions });
+    }
+    return res.json({ sessions: listSessions(filterUserId || undefined) });
+});
+
+app.post('/api/security/sessions/:id/revoke', requireRoleAtLeast('USER'), (req, res) => {
+    const actor = (req as any).auth?.user;
+    const sid = String(req.params.id || '').trim();
+    const s = findSession(sid);
+    if (!s) return res.status(404).json({ error: 'Sesión no encontrada' });
+    if (actor?.role === 'USER' && s.userId !== actor.id) return res.status(403).json({ error: 'No permitido' });
+    if (actor?.role === 'ADMIN' && s.userId === 'owner') return res.status(403).json({ error: 'No permitido' });
+    if (actor?.role === 'ADMIN') {
+        const targetUser = findUserById(s.userId);
+        if (targetUser && targetUser.role !== 'USER') return res.status(403).json({ error: 'No permitido' });
+    }
+    revokeSession(sid, actor?.id || null, 'revoked');
+    audit(req, 'session_revoked', s.userId, { sessionId: sid });
+    res.json({ success: true });
+});
+
+app.post('/api/security/sessions/revoke-all', requireRoleAtLeast('OWNER'), (req, res) => {
+    const actor = (req as any).auth?.user;
+    const keep = String((req as any).auth?.sessionId || '').trim();
+    revokeAllSessionsExcept(keep, actor?.id || null, 'close_all_sessions');
+    audit(req, 'close_all_sessions', null);
+    res.json({ success: true });
+});
+
+app.post('/api/security/emergency-lock', requireRoleAtLeast('OWNER'), (req, res) => {
+    const actor = (req as any).auth?.user;
+    setEmergencyLock(true);
+    const keep = String((req as any).auth?.sessionId || '').trim();
+    revokeAllSessionsExcept(keep, actor?.id || null, 'emergency_lock');
+    for (const u of listUsers()) {
+        setUserDisabled(u.id, true);
+    }
+    audit(req, 'emergency_lock', null);
+    notifyOwner({ action: 'emergency_lock', by: actor?.id || null, at: Date.now() });
+    res.json({ success: true });
+});
+
+app.post('/api/security/emergency-unlock', requireRoleAtLeast('OWNER'), (req, res) => {
+    setEmergencyLock(false);
+    audit(req, 'emergency_unlock', null);
+    notifyOwner({ action: 'emergency_unlock', by: (req as any).auth?.user?.id || null, at: Date.now() });
+    res.json({ success: true });
+});
+
+app.post('/api/security/2fa/init', requireRoleAtLeast('USER'), (req, res) => {
+    const actor = (req as any).auth?.user;
+    const secret = generateTotpSecret();
+    const issuer = 'Panel WhatsApp Multi-Dispositivo';
+    const account = actor?.email || actor?.username || 'user';
+    const otpauthUrl = buildOtpauthUrl({ issuer, account, secretBase32: secret });
+    res.json({ secret, otpauthUrl });
+});
+
+app.post('/api/security/2fa/confirm', requireRoleAtLeast('USER'), async (req, res) => {
+    try {
+        const actor = (req as any).auth?.user;
+        const { secret, code, currentPassword } = req.body || {};
+        const secretBase32 = String(secret || '').trim();
+        const otp = String(code || '').trim();
+        if (!secretBase32) return res.status(400).json({ error: 'secret requerido' });
+        if (!verifyTotpCode(secretBase32, otp)) return res.status(400).json({ error: 'Código inválido' });
+
+        if (actor?.role === 'OWNER') {
+            if (String(currentPassword || '') !== getOwnerPassword()) return res.status(400).json({ error: 'Contraseña actual incorrecta' });
+            setOwnerTwoFactorSecret(secretBase32);
+            rotateOwnerTokenVersion();
+            revokeAllSessionsForUser('owner', 'owner', '2fa_enabled');
+            audit(req, '2fa_enabled', 'owner');
+            notifyOwner({ action: '2fa_enabled', userId: 'owner', by: 'owner', at: Date.now() });
+            return res.json({ success: true });
+        }
+
+        const stored = actor?.id ? findUserById(actor.id) : null;
+        if (!stored) return res.status(401).json({ error: 'No autorizado' });
+        const ok = await verifyPassword(String(currentPassword || ''), stored.passwordHash);
+        if (!ok) return res.status(400).json({ error: 'Contraseña actual incorrecta' });
+        setUserTwoFactorSecret(stored.id, secretBase32);
+        revokeAllSessionsForUser(stored.id, stored.id, '2fa_enabled');
+        audit(req, '2fa_enabled', stored.id);
+        notifyOwner({ action: '2fa_enabled', userId: stored.id, by: stored.id, at: Date.now() });
+        return res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error?.message || 'Error al configurar 2FA' });
+    }
+});
+
+app.post('/api/security/2fa/disable', requireRoleAtLeast('OWNER'), async (req, res) => {
+    try {
+        const { userId, currentPassword, otp } = req.body || {};
+        if (String(currentPassword || '') !== getOwnerPassword()) return res.status(400).json({ error: 'Contraseña incorrecta' });
+        const ownerSecret = getOwnerTwoFactorSecret();
+        if (ownerSecret && !verifyTotpCode(ownerSecret, String(otp || ''))) return res.status(400).json({ error: 'Código 2FA inválido' });
+        const targetId = String(userId || '').trim();
+        const target = findUserById(targetId);
+        if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (target.role === 'ADMIN') return res.status(400).json({ error: '2FA es obligatorio para ADMIN. Demotear a USER antes.' });
+        setUserTwoFactorSecret(targetId, null);
+        revokeAllSessionsForUser(targetId, 'owner', '2fa_disabled');
+        audit(req, '2fa_disabled', targetId);
+        notifyOwner({ action: '2fa_disabled', userId: targetId, by: 'owner', at: Date.now() });
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error?.message || 'Error al desactivar 2FA' });
     }
 });
 
@@ -603,7 +897,25 @@ io.use((socket, next) => {
     const token = String((socket.handshake as any)?.auth?.token || '');
     const verified = verifyAuthToken(token);
     if (!verified) return next(new Error('UNAUTHORIZED'));
-    (socket as any).user = verified;
+    const session = findSession(verified.sid);
+    if (!session || session.userId !== verified.sub || session.revokedAt) return next(new Error('UNAUTHORIZED'));
+    const st = loadOwnerState();
+    if (st.emergencyLock && verified.r !== 'OWNER') return next(new Error('LOCKED'));
+    if (verified.r === 'OWNER') {
+        const owner = getOwnerUser();
+        if (owner.tokenVersion !== verified.tv) return next(new Error('UNAUTHORIZED'));
+        (socket as any).auth = { userId: owner.id, role: owner.role, sessionId: session.id };
+        socket.join(`role:${owner.role}`);
+        socket.join(`user:${owner.id}`);
+        return next();
+    }
+    const u = findUserById(verified.sub);
+    if (!u || u.disabled) return next(new Error('UNAUTHORIZED'));
+    if (u.role !== verified.r) return next(new Error('UNAUTHORIZED'));
+    if (u.tokenVersion !== verified.tv) return next(new Error('UNAUTHORIZED'));
+    (socket as any).auth = { userId: u.id, role: u.role, sessionId: session.id };
+    socket.join(`role:${u.role}`);
+    socket.join(`user:${u.id}`);
     next();
 });
 

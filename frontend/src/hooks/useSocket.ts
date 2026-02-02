@@ -9,13 +9,17 @@ export const useSocket = () => {
     useEffect(() => {
         const url = SOCKET_URL || API_BASE || undefined;
         const token = getAuthToken();
+        if (!token) {
+            setSocket(null);
+            return;
+        }
         const newSocket = url ? io(url, { auth: { token } }) : io({ auth: { token } });
         setSocket(newSocket);
 
         return () => {
             newSocket.close();
         };
-    }, []);
+    }, [API_BASE, SOCKET_URL, getAuthToken()]);
 
     return socket;
 };

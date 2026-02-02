@@ -1,15 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Button, ConfigProvider, theme } from 'antd';
+import { Button, ConfigProvider, notification, theme } from 'antd';
 import { MessageSquare } from 'lucide-react';
 import { WhatsAppPanelModal } from './components/WhatsAppPanelModal';
 import { Login } from './components/Login';
 import { clearAuthToken, getAuthToken } from './lib/auth';
 import { unlockNotificationAudio } from './services/notificationSound.service';
 import { initTts } from './services/tts.service';
+import { GlobalSecurityModal } from './components/GlobalSecurityModal';
+import { useSocket } from './hooks/useSocket';
 
 function App() {
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isSecurityOpen, setIsSecurityOpen] = useState(false);
     const [authed, setAuthed] = useState(() => Boolean(getAuthToken()));
+    const socket = useSocket();
+    const [notificationApi, notificationContextHolder] = notification.useNotification();
 
     useEffect(() => {
         const unlock = () => {
@@ -47,6 +52,23 @@ function App() {
         initTts();
     }, []);
 
+    useEffect(() => {
+        if (!socket) return;
+        const handler = (evt: any) => {
+            const action = String(evt?.action || 'security');
+            notificationApi.warning({
+                message: 'Seguridad',
+                description: action,
+                placement: 'topRight',
+                duration: 6
+            });
+        };
+        socket.on('security:event', handler);
+        return () => {
+            socket.off('security:event', handler);
+        };
+    }, [socket]);
+
     if (!authed) {
         return <Login onLoggedIn={() => setAuthed(true)} />;
     }
@@ -61,6 +83,7 @@ function App() {
                 },
             }}
         >
+            {notificationContextHolder}
             <div style={{
                 height: '100vh',
                 display: 'flex',
@@ -71,8 +94,13 @@ function App() {
                 gap: '20px'
             }}>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                    <h1 style={{ color: '#e9edef', margin: 0 }}>WhatsApp</h1>
-                    <p style={{ color: '#8696a0' }}>Gestión Multi-Dispositivo para Sucursales</p>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                        <h1 style={{ color: '#e9edef', margin: 0 }}>Panel WhatsApp Multi-Dispositivo</h1>
+                        <Button type="default" onClick={() => setIsSecurityOpen(true)}>
+                            🔒 Seguridad
+                        </Button>
+                    </div>
+                    <p style={{ color: '#8696a0' }}>Modelo OWNER + ADMINS (control total preservado)</p>
                 </div>
 
                 <Button
@@ -99,6 +127,7 @@ function App() {
                     visible={isModalOpen}
                     onClose={() => setIsModalOpen(false)}
                 />
+                <GlobalSecurityModal open={isSecurityOpen} onClose={() => setIsSecurityOpen(false)} />
             </div>
         </ConfigProvider>
     );

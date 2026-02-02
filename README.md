@@ -15,14 +15,14 @@ Panel web/desktop para administrar múltiples sesiones de WhatsApp (sucursales),
 
 ## Configuración (seguridad)
 
-El acceso al panel está protegido por usuario/contraseña.
+El acceso al panel está protegido por un modelo **OWNER + ADMINS** (control total preservado).
 
 - Backend:
-  - `APP_USERNAME` (default: `admin`)
-  - `APP_PASSWORD` (default: `admin`)
+  - `OWNER_USERNAME` (ej: `admin`)
+  - `OWNER_PASSWORD` (obligatoria, no se cambia desde la UI)
   - `APP_AUTH_SECRET` (default dev: `dev-secret-change-me`)
-- La contraseña puede cambiarse desde Configuración (se guarda hasheada en `db/app-auth.json`).
-- La carpeta `db/` está ignorada por git (no se suben credenciales).
+- 2FA (TOTP) es obligatorio para OWNER y ADMINS (se configura desde **🔒 Seguridad**).
+- Los usuarios/sesiones/logs se guardan en `db/security/*` (la carpeta `db/` está ignorada por git).
 
 ## Desarrollo (web)
 
@@ -67,5 +67,4 @@ npm run build
 ## Notas
 
 - No subir la carpeta `db/` ni archivos `.env*`.
-- Si querés resetear la contraseña al default, borrá `db/app-auth.json`.
-
+- Si perdés la contraseña del OWNER, se recupera únicamente por acceso al servidor (variables de entorno).

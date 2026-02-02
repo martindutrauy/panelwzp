@@ -18,9 +18,15 @@ Este documento describe el proceso completo para desplegar este proyecto en Rail
 
 ### Backend (service del backend)
 
-- `APP_USERNAME`: usuario (ej: `admin`)
-- `APP_PASSWORD`: contraseña (fuerte)
+- `OWNER_USERNAME`: usuario del propietario (ej: `admin`)
+- `OWNER_PASSWORD`: contraseña del propietario (fuerte). No se cambia desde la UI
+- `OWNER_EMAIL` (opcional): email del propietario (para referencia)
+- `OWNER_TOTP_SECRET` (opcional): secreto TOTP del propietario (si se gestiona por env)
 - `APP_AUTH_SECRET`: secreto largo (32+ chars)
+- `APP_TOKEN_TTL_MS` (opcional): expiración del token (default 8h)
+- `APP_SESSION_IDLE_TTL_MS` (opcional): expiración por inactividad (default 24h)
+- `APP_PASSWORD_MIN_LEN` (opcional): mínimo de contraseña para usuarios (default 10)
+- `APP_BCRYPT_ROUNDS` (opcional): costo de bcrypt (default 12)
 - `APP_CORS_ORIGINS` (opcional): allowlist de orígenes (comma-separated) o `*`
   - Ej: `https://TU_FRONTEND.up.railway.app`
 - `DB_ROOT` (opcional): si no se setea, el backend usa el volumen automáticamente si existe
@@ -29,11 +35,14 @@ Este documento describe el proceso completo para desplegar este proyecto en Rail
 Persistencia:
 - El backend guarda datos bajo `DB_ROOT` (por defecto en volumen si está montado).
 - Dentro se guardan:
-  - `app-auth.json` (credenciales persistidas si se cambia contraseña desde el panel)
   - `devices.json` (sucursales/dispositivos)
   - `storage/` (archivos)
   - `auth/<deviceId>/` (sesiones Baileys)
   - `messages/` (base propia del panel: backup de mensajes por sucursal)
+  - `security/owner.json` (estado OWNER: 2FA/emergency lock/token version)
+  - `security/users.json` (usuarios ADMIN/USER)
+  - `security/sessions.json` (sesiones del panel)
+  - `security/audit.log` (logs inmutables de seguridad)
 
 ### Frontend (service del frontend)
 
@@ -58,8 +67,8 @@ Nota: en Vite las variables `VITE_*` se “pegan” al compilar. Si las cambiás
    - **Build Command**: `npm ci && npm run build`
    - **Start Command**: `npm run start:prod`
 4. En **Variables** del backend, agregar:
-   - `APP_USERNAME`
-   - `APP_PASSWORD`
+   - `OWNER_USERNAME`
+   - `OWNER_PASSWORD`
    - `APP_AUTH_SECRET`
 5. En **Settings → Networking**:
    - **Generate Domain** para obtener `https://TU_BACKEND.up.railway.app`
@@ -95,7 +104,8 @@ Notas:
 ### 5) Login y vinculación WhatsApp (QR)
 
 1. Abrir la URL del frontend.
-2. Loguear con `APP_USERNAME`/`APP_PASSWORD`.
+2. Loguear con `OWNER_USERNAME`/`OWNER_PASSWORD`.
+3. Ir a **🔒 Seguridad** y configurar 2FA (obligatorio para OWNER y ADMINS).
 3. Crear una sucursal/dispositivo (o usar uno existente).
 4. Iniciar dispositivo → ver QR → escanear desde WhatsApp:
    - WhatsApp → Dispositivos vinculados → Vincular un dispositivo → escanear.
@@ -124,9 +134,9 @@ Por defecto el backend puede funcionar con `*`. Para producción, restringir:
 
 ### 2) Secretos
 
-- No compartir `APP_PASSWORD`, `APP_AUTH_SECRET`, tokens ni QR en capturas.
+- No compartir `OWNER_PASSWORD`, `APP_AUTH_SECRET`, tokens ni QR en capturas.
 - Guardar `APP_AUTH_SECRET` en un gestor de secretos.
-- Rotar `APP_PASSWORD` si se expuso.
+- Rotar `OWNER_PASSWORD` si se expuso.
 
 ## Troubleshooting
 
