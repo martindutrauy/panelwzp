@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown } from 'antd';
+import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown, Popover } from 'antd';
 import { Reply, Copy } from 'lucide-react';
-import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker } from 'lucide-react';
+import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker, Smile } from 'lucide-react';
+
+// Emojis más usados en WhatsApp organizados por categoría
+const EMOJI_CATEGORIES = {
+    'Caritas': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐'],
+    'Gestos': ['😤', '😠', '😡', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '🙈', '🙉', '🙊'],
+    'Manos': ['👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💪'],
+    'Corazones': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '♥️'],
+    'Celebración': ['🎉', '🎊', '🎈', '🎁', '🎀', '🎂', '🍰', '🧁', '🥂', '🍾', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '🎗️', '🎄', '🎃', '🎆', '🎇', '✨', '🎵', '🎶', '🎤', '🎧'],
+    'Objetos': ['📱', '💻', '⌨️', '🖥️', '📷', '📹', '🎥', '📞', '☎️', '📺', '📻', '⏰', '⌚', '💰', '💵', '💴', '💶', '💷', '💳', '🔑', '🗝️', '🔒', '🔓', '📦', '📫', '📬', '📭', '📮', '✉️', '📧'],
+    'Símbolos': ['✅', '❌', '⭕', '❗', '❓', '‼️', '⁉️', '💯', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫', '⚪', '🟤', '▶️', '⏸️', '⏹️', '⏺️', '⏭️', '⏮️', '🔀', '🔁', '🔂', '➡️', '⬅️', '⬆️', '⬇️', '↗️', '↘️', '↙️', '↖️', '🔃', '🔄']
+};
 import QRCode from 'react-qr-code';
 import { useSocket } from '../hooks/useSocket';
 import { apiFetch, assetUrl } from '../lib/runtime';
@@ -124,8 +135,17 @@ export const ChatInterface = ({
     // Estado para responder mensajes (reply/quote)
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
     
+    // Estado para el selector de emojis
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [activeEmojiCategory, setActiveEmojiCategory] = useState<string>('Caritas');
+    
     // Cancelar respuesta
     const cancelReply = () => setReplyingTo(null);
+    
+    // Insertar emoji en el texto
+    const insertEmoji = (emoji: string) => {
+        setInputText(prev => prev + emoji);
+    };
 
     // Inyectar estilos de animación RETRO para las tarjetas de chat
     useEffect(() => {
@@ -1788,6 +1808,119 @@ export const ChatInterface = ({
                                         style={{ display: 'none' }}
                                         onChange={handleFileSelect}
                                     />
+                                    {/* Selector de Emojis */}
+                                    <Popover
+                                        content={
+                                            <div style={{ width: 320, maxHeight: 350 }}>
+                                                {/* Categorías */}
+                                                <div style={{ 
+                                                    display: 'flex', 
+                                                    gap: 4, 
+                                                    marginBottom: 8, 
+                                                    flexWrap: 'wrap',
+                                                    borderBottom: '1px solid rgba(201, 162, 39, 0.2)',
+                                                    paddingBottom: 8
+                                                }}>
+                                                    {Object.keys(EMOJI_CATEGORIES).map(cat => (
+                                                        <Button
+                                                            key={cat}
+                                                            size="small"
+                                                            type={activeEmojiCategory === cat ? 'primary' : 'text'}
+                                                            onClick={() => setActiveEmojiCategory(cat)}
+                                                            style={{ 
+                                                                fontSize: 11,
+                                                                padding: '2px 8px',
+                                                                background: activeEmojiCategory === cat 
+                                                                    ? 'linear-gradient(145deg, #c9a227 0%, #8b7015 100%)' 
+                                                                    : 'transparent',
+                                                                color: activeEmojiCategory === cat ? '#1a1410' : '#c9a227',
+                                                                border: activeEmojiCategory === cat 
+                                                                    ? 'none' 
+                                                                    : '1px solid rgba(201, 162, 39, 0.3)'
+                                                            }}
+                                                        >
+                                                            {cat}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                                {/* Grid de emojis */}
+                                                <div style={{ 
+                                                    display: 'grid', 
+                                                    gridTemplateColumns: 'repeat(8, 1fr)', 
+                                                    gap: 4,
+                                                    maxHeight: 250,
+                                                    overflowY: 'auto'
+                                                }}>
+                                                    {EMOJI_CATEGORIES[activeEmojiCategory as keyof typeof EMOJI_CATEGORIES]?.map((emoji, idx) => (
+                                                        <Button
+                                                            key={idx}
+                                                            type="text"
+                                                            onClick={() => {
+                                                                insertEmoji(emoji);
+                                                                // No cerrar para permitir seleccionar múltiples
+                                                            }}
+                                                            style={{ 
+                                                                fontSize: 22, 
+                                                                padding: 4,
+                                                                minWidth: 36,
+                                                                height: 36,
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                borderRadius: 6,
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseEnter={e => {
+                                                                e.currentTarget.style.background = 'rgba(201, 162, 39, 0.2)';
+                                                                e.currentTarget.style.transform = 'scale(1.2)';
+                                                            }}
+                                                            onMouseLeave={e => {
+                                                                e.currentTarget.style.background = 'transparent';
+                                                                e.currentTarget.style.transform = 'scale(1)';
+                                                            }}
+                                                        >
+                                                            {emoji}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        }
+                                        title={
+                                            <span style={{ 
+                                                color: '#c9a227', 
+                                                fontFamily: "'Playfair Display', Georgia, serif" 
+                                            }}>
+                                                Emojis
+                                            </span>
+                                        }
+                                        trigger="click"
+                                        open={showEmojiPicker}
+                                        onOpenChange={setShowEmojiPicker}
+                                        placement="topLeft"
+                                        overlayStyle={{ 
+                                            background: 'linear-gradient(145deg, #2f261d 0%, #1a1410 100%)',
+                                            borderRadius: 10,
+                                            border: '1px solid rgba(201, 162, 39, 0.3)'
+                                        }}
+                                        overlayInnerStyle={{
+                                            background: 'transparent'
+                                        }}
+                                    >
+                                        <Tooltip title="Emojis">
+                                            <Button
+                                                type="text"
+                                                icon={<Smile size={20} color="#c9a227" />}
+                                                style={{
+                                                    background: showEmojiPicker 
+                                                        ? 'linear-gradient(145deg, #4a3d2e 0%, #3d3225 100%)' 
+                                                        : 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                                    border: '1px solid rgba(201, 162, 39, 0.3)',
+                                                    borderRadius: '8px'
+                                                }}
+                                            />
+                                        </Tooltip>
+                                    </Popover>
+                                    
                                     <Tooltip title="Adjuntar archivo">
                                         <Button
                                             type="text"
