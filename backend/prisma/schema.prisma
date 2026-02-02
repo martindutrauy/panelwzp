@@ -6,6 +6,8 @@ generator client {
   // requerir driver adapters/Accelerate en runtime.
   provider   = "prisma-client"
   engineType = "binary"
+  // Requerido por `prisma-client`. Ruta relativa a este directorio (`prisma/`).
+  output     = "../generated/prisma"
 }
 
 datasource db {
