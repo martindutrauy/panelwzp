@@ -682,6 +682,46 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                       >
                                           Activar Emergency Lock
                                       </Button>
+                                      
+                                      <Divider />
+                                      <Typography.Title level={5}>🔄 Reset de Cache de Dispositivos</Typography.Title>
+                                      <Text style={{ color: '#8696a0', display: 'block', marginBottom: 12 }}>
+                                          Limpia el cache de chats, contactos y mensajes de todos los dispositivos. Útil si ves nombres incorrectos o datos mezclados.
+                                      </Text>
+                                      <Button
+                                          danger
+                                          onClick={async () => {
+                                              const ok = window.confirm('¿Resetear cache de TODOS los dispositivos? Los chats se recargarán con datos frescos.');
+                                              if (!ok) return;
+                                              try {
+                                                  // Obtener lista de dispositivos
+                                                  const devRes = await apiFetch('/api/devices');
+                                                  const devices = await devRes.json();
+                                                  if (!Array.isArray(devices) || devices.length === 0) {
+                                                      messageApi.warning('No hay dispositivos para resetear');
+                                                      return;
+                                                  }
+                                                  
+                                                  let resetCount = 0;
+                                                  for (const dev of devices) {
+                                                      try {
+                                                          const res = await apiFetch(`/api/devices/${dev.id}/reset-cache`, { method: 'POST' });
+                                                          const data = await res.json();
+                                                          if (data.success) resetCount++;
+                                                      } catch {
+                                                          // Ignorar errores individuales
+                                                      }
+                                                  }
+                                                  
+                                                  messageApi.success(`Cache reseteado en ${resetCount}/${devices.length} dispositivo(s). Recargando...`);
+                                                  setTimeout(() => window.location.reload(), 2000);
+                                              } catch (e: any) {
+                                                  messageApi.error(String(e?.message || 'Error al resetear cache'));
+                                              }
+                                          }}
+                                      >
+                                          Resetear Cache de Todos los Dispositivos
+                                      </Button>
                                   </div>
                               )
                           }

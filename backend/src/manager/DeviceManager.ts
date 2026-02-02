@@ -253,46 +253,52 @@ export class DeviceManager {
         ensureDir(this.messagesDbRoot);
         this.loadData();
         this.initRetentionJob();
-        // Auto-reconectar dispositivos con sesión guardada al iniciar
-        this.autoReconnectOnStartup();
+        // NO auto-reconectar en el constructor - hacerlo después de que el servidor esté listo
     }
 
-    private async autoReconnectOnStartup() {
-        // Primero, marcar todos los dispositivos con sesión guardada como "RECONNECTING"
-        // para que el frontend muestre un estado apropiado
+    // Método público para iniciar auto-reconexión (llamar después de que el servidor esté listo)
+    public async startAutoReconnect() {
+        // Marcar dispositivos con sesión guardada como "RECONNECTING"
+        const devicesToReconnect: string[] = [];
+        
         for (const device of this.devices) {
             const authPath = dbPath('auth', device.id);
             const credsPath = path.join(authPath, 'creds.json');
             if (fs.existsSync(credsPath)) {
-                // Marcar como reconectando inmediatamente
+                devicesToReconnect.push(device.id);
                 this.updateDevice(device.id, { status: 'RECONNECTING', qr: null });
-                console.log(`[${device.id}] Sesión guardada detectada, marcado como RECONNECTING`);
+                console.log(`[${device.id}] Sesión guardada detectada`);
             }
         }
         
-        // Esperar un poco para que el servidor termine de iniciar
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Ahora iniciar las reconexiones
-        for (const device of this.devices) {
-            const authPath = dbPath('auth', device.id);
-            const credsPath = path.join(authPath, 'creds.json');
-            if (fs.existsSync(credsPath)) {
-                console.log(`[${device.id}] Iniciando auto-reconexión...`);
-                try {
-                    void this.initDevice(device.id, 'qr').catch(err => {
-                        console.log(`[${device.id}] Error en auto-reconexión: ${err?.message || err}`);
-                        // Si falla, volver a DISCONNECTED
-                        this.updateDevice(device.id, { status: 'DISCONNECTED', qr: null });
-                    });
-                    // Esperar un poco entre reconexiones para no saturar
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } catch (err) {
-                    console.log(`[${device.id}] Error iniciando auto-reconexión:`, err);
-                    this.updateDevice(device.id, { status: 'DISCONNECTED', qr: null });
-                }
-            }
+        if (devicesToReconnect.length === 0) {
+            console.log('[AutoReconnect] No hay dispositivos con sesión guardada');
+            return;
         }
+        
+        console.log(`[AutoReconnect] ${devicesToReconnect.length} dispositivo(s) para reconectar`);
+        
+        // Esperar a que el servidor esté completamente listo
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Reconectar uno por uno con delay entre cada uno
+        for (const deviceId of devicesToReconnect) {
+            console.log(`[${deviceId}] Iniciando auto-reconexión...`);
+            try {
+                await this.initDevice(deviceId, 'qr').catch(err => {
+                    console.log(`[${deviceId}] Error en auto-reconexión: ${err?.message || err}`);
+                    this.updateDevice(deviceId, { status: 'DISCONNECTED', qr: null });
+                });
+            } catch (err: any) {
+                console.log(`[${deviceId}] Error iniciando auto-reconexión:`, err?.message || err);
+                this.updateDevice(deviceId, { status: 'DISCONNECTED', qr: null });
+            }
+            
+            // Esperar 3 segundos entre reconexiones para no saturar memoria
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+        
+        console.log('[AutoReconnect] Proceso completado');
     }
 
     private async dbUpsertDeviceRecord(device: { id: string; name: string; status?: string; qr?: string | null; phoneNumber?: string | null; number?: string | null }) {

@@ -1063,7 +1063,45 @@ export const stopBackend = () => {
     });
 };
 
+// Manejo de shutdown graceful para SIGTERM (Railway, Docker, etc)
+let isShuttingDown = false;
+const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    console.log(`\n[${signal}] Iniciando shutdown graceful...`);
+    
+    try {
+        // Cerrar servidor HTTP
+        await stopBackend();
+        console.log('[Shutdown] Servidor HTTP cerrado');
+        
+        // Dar tiempo para que las conexiones se cierren
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log('[Shutdown] Completado');
+        process.exit(0);
+    } catch (err) {
+        console.error('[Shutdown] Error:', err);
+        process.exit(1);
+    }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 if (require.main === module) {
     const port = process.env.PORT ? Number(process.env.PORT) : 5000;
-    startBackend(Number.isFinite(port) ? port : 5000);
+    startBackend(Number.isFinite(port) ? port : 5000)
+        .then(() => {
+            console.log('[Server] Listo, iniciando auto-reconexión de dispositivos...');
+            // Iniciar auto-reconexión después de que el servidor esté listo
+            deviceManager.startAutoReconnect().catch(err => {
+                console.error('[AutoReconnect] Error:', err);
+            });
+        })
+        .catch(err => {
+            console.error('[Server] Error al iniciar:', err);
+            process.exit(1);
+        });
 }
