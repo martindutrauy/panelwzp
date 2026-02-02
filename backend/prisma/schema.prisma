@@ -6,10 +6,9 @@ generator client {
   // requerir driver adapters/Accelerate en runtime.
   provider   = "prisma-client"
   engineType = "binary"
-  // Requerido por `prisma-client`. Generamos en el path estándar para
-  // poder importar desde `@prisma/client` sin rutas relativas frágiles.
-  // Ruta relativa a este directorio (`prisma/`).
-  output     = "../node_modules/@prisma/client"
+  // Requerido por `prisma-client`. Ruta relativa a este directorio (`prisma/`).
+  // Importaremos desde `../generated/prisma/client`.
+  output     = "../generated/prisma"
 }
 
 datasource db {
