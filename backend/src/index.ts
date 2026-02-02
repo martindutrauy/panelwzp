@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { DB_ROOT } from './config/paths';
 import { ensureDir } from './config/ensureDir';
+import { assertDatabaseConfigured } from './db/prisma';
 import { requireAuth } from './auth/middleware';
 import { audit, requireRoleAtLeast } from './auth/middleware';
 import { createSession, findSession, listSessions, revokeAllSessions, revokeAllSessionsExcept, revokeAllSessionsForUser, revokeSession } from './auth/sessionStore';
@@ -82,6 +83,9 @@ const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 100 * 1024 * 1024 } // 100 MB máximo
 });
+
+// Fail-fast: si falta DATABASE_URL en producción, abortar con un error claro.
+assertDatabaseConfigured();
 
 app.use(cors(corsOptions));
 // Express v5 + path-to-regexp no acepta '*' como ruta
