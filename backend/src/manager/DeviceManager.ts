@@ -2182,85 +2182,97 @@ export class DeviceManager {
             const prisma = getPrisma();
             if (prisma) {
                 // Obtener chats con su último mensaje
-                const rows = await prisma.chat.findMany({
-                    where: { deviceId },
-                    orderBy: { lastMessageAt: 'desc' },
-                    include: {
-                        messages: {
-                            orderBy: { timestamp: 'desc' },
-                            take: 1,
-                            select: {
-                                text: true,
-                                fromMe: true,
-                                type: true,
-                                mediaPath: true,
-                                rawJson: true
-                            }
-                        }
-                    }
-                });
-                return rows.map((c: any) => {
-                    const lastMsg = c.messages?.[0];
-                    let lastMessageText: string | null = null;
-                    let lastMessageType: string = 'text';
-                    let lastMessageFromMe: boolean = false;
-                    let lastMessageMedia: { mimeType?: string; duration?: number } | null = null;
-
-                    if (lastMsg) {
-                        lastMessageText = lastMsg.text;
-                        lastMessageType = lastMsg.type || 'text';
-                        lastMessageFromMe = Boolean(lastMsg.fromMe);
-                        
-                        // Extraer duración del audio si existe
-                        if (lastMsg.rawJson) {
-                            try {
-                                const raw = JSON.parse(lastMsg.rawJson);
-                                if (raw?.media?.mimeType) {
-                                    lastMessageMedia = { mimeType: raw.media.mimeType };
-                                    // Intentar extraer duración del audio
-                                    if (raw.media.duration) {
-                                        lastMessageMedia.duration = raw.media.duration;
-                                    }
+                let rows: any[] = [];
+                try {
+                    rows = await prisma.chat.findMany({
+                        where: { deviceId },
+                        orderBy: { lastMessageAt: 'desc' },
+                        include: {
+                            messages: {
+                                orderBy: { timestamp: 'desc' },
+                                take: 1,
+                                select: {
+                                    text: true,
+                                    fromMe: true,
+                                    type: true,
+                                    mediaPath: true,
+                                    rawJson: true
                                 }
-                            } catch {}
-                        }
-                        
-                        // Inferir tipo de media del path si no hay rawJson
-                        if (!lastMessageMedia && lastMsg.mediaPath) {
-                            const ext = String(lastMsg.mediaPath).split('.').pop()?.toLowerCase();
-                            if (['ogg', 'mp3', 'wav', 'webm', 'm4a', 'opus'].includes(ext || '')) {
-                                lastMessageMedia = { mimeType: 'audio/' + ext };
-                            } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
-                                lastMessageMedia = { mimeType: 'image/' + ext };
-                            } else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext || '')) {
-                                lastMessageMedia = { mimeType: 'video/' + ext };
                             }
                         }
-                    }
+                    });
+                } catch (dbError: any) {
+                    console.error(`[${deviceId}] Error al obtener chats de DB:`, dbError.message);
+                    // Si falla la DB, continuar con el store en memoria
+                    rows = [];
+                }
+                
+                if (rows.length > 0) {
+                    return rows.map((c: any) => {
+                        const lastMsg = c.messages?.[0];
+                        let lastMessageText: string | null = null;
+                        let lastMessageType: string = 'text';
+                        let lastMessageFromMe: boolean = false;
+                        let lastMessageMedia: { mimeType?: string; duration?: number } | null = null;
 
-                    // Priorizar: customName (nombre personalizado) > name (pushName de WhatsApp) > número
-                    const displayName = c.customName 
-                        ? String(c.customName).trim() 
-                        : (String(c.name || '').trim() || c.waChatId.split('@')[0]);
-                    
-                    return {
-                        id: c.waChatId,
-                        name: displayName,
-                        originalName: c.name || null, // Guardar el nombre original de WhatsApp
-                        customName: c.customName || null, // Nombre personalizado por el usuario
-                        lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now(),
-                        unreadCount: Number(c.unreadCount || 0),
-                        isGroup: Boolean(c.isGroup),
-                        profilePhotoUrl: c.profilePhotoUrl || null,
-                        lastMessage: lastMessageText,
-                        lastMessageType,
-                        lastMessageFromMe,
-                        lastMessageMedia
-                    };
-                });
+                        if (lastMsg) {
+                            lastMessageText = lastMsg.text;
+                            lastMessageType = lastMsg.type || 'text';
+                            lastMessageFromMe = Boolean(lastMsg.fromMe);
+                            
+                            // Extraer duración del audio si existe
+                            if (lastMsg.rawJson) {
+                                try {
+                                    const raw = JSON.parse(lastMsg.rawJson);
+                                    if (raw?.media?.mimeType) {
+                                        lastMessageMedia = { mimeType: raw.media.mimeType };
+                                        // Intentar extraer duración del audio
+                                        if (raw.media.duration) {
+                                            lastMessageMedia.duration = raw.media.duration;
+                                        }
+                                    }
+                                } catch {}
+                            }
+                            
+                            // Inferir tipo de media del path si no hay rawJson
+                            if (!lastMessageMedia && lastMsg.mediaPath) {
+                                const ext = String(lastMsg.mediaPath).split('.').pop()?.toLowerCase();
+                                if (['ogg', 'mp3', 'wav', 'webm', 'm4a', 'opus'].includes(ext || '')) {
+                                    lastMessageMedia = { mimeType: 'audio/' + ext };
+                                } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
+                                    lastMessageMedia = { mimeType: 'image/' + ext };
+                                } else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext || '')) {
+                                    lastMessageMedia = { mimeType: 'video/' + ext };
+                                }
+                            }
+                        }
+
+                        // Priorizar: customName (nombre personalizado) > name (pushName de WhatsApp) > número
+                        // Usar acceso seguro por si el campo customName no existe en la DB todavía
+                        const customName = (c as any).customName || null;
+                        const displayName = customName 
+                            ? String(customName).trim() 
+                            : (String(c.name || '').trim() || c.waChatId.split('@')[0]);
+                        
+                        return {
+                            id: c.waChatId,
+                            name: displayName,
+                            originalName: c.name || null, // Guardar el nombre original de WhatsApp
+                            customName: customName, // Nombre personalizado por el usuario
+                            lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now(),
+                            unreadCount: Number(c.unreadCount || 0),
+                            isGroup: Boolean(c.isGroup),
+                            profilePhotoUrl: c.profilePhotoUrl || null,
+                            lastMessage: lastMessageText,
+                            lastMessageType,
+                            lastMessageFromMe,
+                            lastMessageMedia
+                        };
+                    });
+                }
             }
 
-            // Obtener store del dispositivo
+            // Obtener store del dispositivo (fallback si no hay DB o está vacía)
             const store = stores.get(deviceId);
             if (!store) {
                 console.log(`[${deviceId}] Store no encontrado, devolviendo lista vacía`);
@@ -2621,48 +2633,37 @@ export class DeviceManager {
     // ========== RENOMBRAR CONTACTOS ==========
     
     public async renameChat(deviceId: string, chatId: string, customName: string | null) {
-        const prisma = getPrisma();
-        if (!prisma) {
-            throw new Error('Base de datos no disponible');
-        }
-        
         const store = stores.get(deviceId);
         const canonicalChatId = resolveCanonicalChatId(store, chatId);
         
-        // Actualizar en la base de datos
-        const updated = await prisma.chat.updateMany({
-            where: { 
-                deviceId,
-                waChatId: canonicalChatId
-            },
-            data: {
-                customName: customName ? customName.trim() : null
+        // Intentar actualizar en la base de datos si está disponible
+        const prisma = getPrisma();
+        if (prisma) {
+            try {
+                // Intentar actualizar - puede fallar si el campo customName no existe
+                await prisma.chat.updateMany({
+                    where: { 
+                        deviceId,
+                        waChatId: canonicalChatId
+                    },
+                    data: {
+                        customName: customName ? customName.trim() : null
+                    }
+                });
+            } catch (dbError: any) {
+                console.warn(`[${deviceId}] No se pudo guardar customName en DB (campo puede no existir):`, dbError.message);
+                // Continuar de todas formas, guardaremos en memoria
             }
-        });
-        
-        if (updated.count === 0) {
-            // Si no existe, intentar crearlo
-            await prisma.chat.upsert({
-                where: { deviceId_waChatId: { deviceId, waChatId: canonicalChatId } },
-                update: { customName: customName ? customName.trim() : null },
-                create: {
-                    deviceId,
-                    waChatId: canonicalChatId,
-                    name: canonicalChatId.split('@')[0],
-                    customName: customName ? customName.trim() : null,
-                    isGroup: canonicalChatId.endsWith('@g.us')
-                }
-            });
         }
         
-        // También actualizar en el store de memoria si existe
+        // SIEMPRE actualizar en el store de memoria
         if (store) {
-            const chat = store.chats.get(canonicalChatId);
-            if (chat) {
-                // Guardar el nombre personalizado en el store de contactos
-                if (customName) {
-                    store.contacts.set(canonicalChatId, customName.trim());
-                }
+            // Guardar el nombre personalizado en el store de contactos
+            if (customName) {
+                store.contacts.set(canonicalChatId, customName.trim());
+            } else {
+                // Si se elimina el nombre personalizado, no borrar el contacto
+                // ya que puede tener el pushName original
             }
         }
         

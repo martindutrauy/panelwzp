@@ -445,19 +445,38 @@ export const ChatInterface = ({
     useEffect(() => {
         const fetchChats = async () => {
             try {
+                console.log(`[fetchChats] Cargando chats para ${device.id}...`);
                 const res = await apiFetch(`/api/devices/${device.id}/chats`);
-                const data = await res.json();
+                
+                if (!res.ok) {
+                    console.error(`[fetchChats] Error HTTP: ${res.status}`);
+                    return; // No borrar chats existentes en caso de error
+                }
+                
+                const text = await res.text();
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : [];
+                } catch (parseError) {
+                    console.error('[fetchChats] Error parseando JSON:', parseError);
+                    return;
+                }
+                
                 // Solo actualizar si es un array válido
                 if (Array.isArray(data)) {
+                    console.log(`[fetchChats] ${data.length} chats cargados`);
                     upsertBranchChats(device.id, data);
                     setChats(data);
+                } else if (data?.error) {
+                    console.error('[fetchChats] Error del servidor:', data.error);
+                    // No borrar chats existentes
                 } else {
-                    console.log('Respuesta no es un array:', data);
+                    console.log('[fetchChats] Respuesta no es un array:', data);
                     setChats([]);
                 }
             } catch (error) {
-                console.error('Error al cargar chats:', error);
-                setChats([]);
+                console.error('[fetchChats] Error de red:', error);
+                // No borrar chats existentes en caso de error de red
             }
         };
 
