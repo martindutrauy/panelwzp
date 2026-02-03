@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown, Popover } from 'antd';
 import { Reply, Copy } from 'lucide-react';
-import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker, Smile } from 'lucide-react';
+import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker, Smile, Edit2 } from 'lucide-react';
 
 // Emojis más usados en WhatsApp organizados por categoría
 const EMOJI_CATEGORIES = {
@@ -61,6 +61,8 @@ interface Message {
 interface Chat {
     id: string;
     name: string;
+    originalName?: string | null;  // Nombre original de WhatsApp (pushName)
+    customName?: string | null;    // Nombre personalizado por el usuario (como agenda)
     lastMessageTime: number;
     unreadCount: number;
     isGroup: boolean;
@@ -139,12 +141,46 @@ export const ChatInterface = ({
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [activeEmojiCategory, setActiveEmojiCategory] = useState<string>('Caritas');
     
+    // Estado para editar nombre de contacto
+    const [editingContactName, setEditingContactName] = useState(false);
+    const [newContactName, setNewContactName] = useState('');
+    
     // Cancelar respuesta
     const cancelReply = () => setReplyingTo(null);
     
     // Insertar emoji en el texto
     const insertEmoji = (emoji: string) => {
         setInputText(prev => prev + emoji);
+    };
+    
+    // Guardar nombre personalizado del contacto
+    const saveContactName = async () => {
+        if (!activeChat) return;
+        
+        try {
+            const encodedChatId = encodeURIComponent(activeChat);
+            const res = await apiFetch(`/api/devices/${device.id}/chats/${encodedChatId}/rename`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customName: newContactName.trim() || null })
+            });
+            
+            const result = await res.json();
+            if (result.success) {
+                // Actualizar el chat en la lista local
+                setChats(prev => prev.map(c => 
+                    c.id === activeChat 
+                        ? { ...c, name: newContactName.trim() || c.originalName || c.id.split('@')[0], customName: newContactName.trim() || null }
+                        : c
+                ));
+                messageApi.success('Nombre guardado');
+                setEditingContactName(false);
+            } else {
+                messageApi.error(result.error || 'Error al guardar');
+            }
+        } catch (err: any) {
+            messageApi.error('Error: ' + (err.message || 'Desconocido'));
+        }
     };
 
     // Inyectar estilos de animación RETRO para las tarjetas de chat
@@ -1475,42 +1511,118 @@ export const ChatInterface = ({
                         {(() => {
                             const activeChatData = chats.find(c => c.id === activeChat);
                             const chatName = activeChatData?.name || activeChat.split('@')[0];
+                            const originalName = activeChatData?.originalName || null;
+                            const hasCustomName = Boolean(activeChatData?.customName);
+                            
                             return (
                                 <div style={{ 
                                     padding: '12px 20px', 
                                     background: 'linear-gradient(180deg, #2f261d 0%, #2a2218 100%)', 
                                     display: 'flex', 
                                     alignItems: 'center', 
+                                    justifyContent: 'space-between',
                                     borderBottom: '2px solid',
                                     borderImage: 'linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.4), transparent) 1'
                                 }}>
-                                    <Avatar style={{ 
-                                        backgroundColor: activeChatData?.isGroup ? '#4a7c59' : '#5a4d3d',
-                                        border: '2px solid rgba(201, 162, 39, 0.4)',
-                                        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
-                                        fontFamily: "'Playfair Display', Georgia, serif",
-                                        fontWeight: 700
-                                    }}>
-                                        {chatName.substring(0, 2).toUpperCase()}
-                                    </Avatar>
-                                    <div style={{ marginLeft: 15 }}>
-                                        <div style={{ 
-                                            color: '#f5e6c8', 
-                                            fontWeight: 'bold',
+                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        <Avatar style={{ 
+                                            backgroundColor: activeChatData?.isGroup ? '#4a7c59' : '#5a4d3d',
+                                            border: '2px solid rgba(201, 162, 39, 0.4)',
+                                            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
                                             fontFamily: "'Playfair Display', Georgia, serif",
-                                            fontSize: '15px',
-                                            letterSpacing: '0.3px'
-                                        }}>{chatName}</div>
-                                        {presence && (
-                                            <div style={{ 
-                                                color: '#c9a227', 
-                                                fontSize: '11px',
-                                                fontFamily: "'Source Serif Pro', Georgia, serif",
-                                                fontStyle: 'italic'
-                                            }}>
-                                                {presence === 'composing' ? 'escribiendo...' : presence === 'recording' ? 'grabando audio...' : ''}
-                                            </div>
-                                        )}
+                                            fontWeight: 700
+                                        }}>
+                                            {chatName.substring(0, 2).toUpperCase()}
+                                        </Avatar>
+                                        <div style={{ marginLeft: 15 }}>
+                                            {editingContactName ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <Input
+                                                        value={newContactName}
+                                                        onChange={e => setNewContactName(e.target.value)}
+                                                        onPressEnter={saveContactName}
+                                                        placeholder="Nombre personalizado..."
+                                                        autoFocus
+                                                        style={{ 
+                                                            width: 200,
+                                                            background: '#1a1410',
+                                                            border: '1px solid rgba(201, 162, 39, 0.4)',
+                                                            color: '#f5e6c8'
+                                                        }}
+                                                    />
+                                                    <Button 
+                                                        type="text" 
+                                                        size="small"
+                                                        onClick={saveContactName}
+                                                        style={{ color: '#4a7c59' }}
+                                                    >
+                                                        ✓
+                                                    </Button>
+                                                    <Button 
+                                                        type="text" 
+                                                        size="small"
+                                                        onClick={() => setEditingContactName(false)}
+                                                        style={{ color: '#8b7b65' }}
+                                                    >
+                                                        ✕
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <div style={{ 
+                                                        color: '#f5e6c8', 
+                                                        fontWeight: 'bold',
+                                                        fontFamily: "'Playfair Display', Georgia, serif",
+                                                        fontSize: '15px',
+                                                        letterSpacing: '0.3px'
+                                                    }}>
+                                                        {chatName}
+                                                        {hasCustomName && (
+                                                            <span style={{ 
+                                                                marginLeft: 6, 
+                                                                fontSize: '10px', 
+                                                                color: '#c9a227',
+                                                                fontWeight: 'normal'
+                                                            }}>
+                                                                ✎
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <Tooltip title="Renombrar contacto (como agenda)">
+                                                        <Button
+                                                            type="text"
+                                                            size="small"
+                                                            icon={<Edit2 size={14} color="#8b7b65" />}
+                                                            onClick={() => {
+                                                                setNewContactName(activeChatData?.customName || '');
+                                                                setEditingContactName(true);
+                                                            }}
+                                                            style={{ padding: 4, minWidth: 24 }}
+                                                        />
+                                                    </Tooltip>
+                                                </div>
+                                            )}
+                                            {!editingContactName && originalName && hasCustomName && (
+                                                <div style={{ 
+                                                    color: '#8b7b65', 
+                                                    fontSize: '10px',
+                                                    fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                    fontStyle: 'italic'
+                                                }}>
+                                                    WhatsApp: {originalName}
+                                                </div>
+                                            )}
+                                            {presence && (
+                                                <div style={{ 
+                                                    color: '#c9a227', 
+                                                    fontSize: '11px',
+                                                    fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                    fontStyle: 'italic'
+                                                }}>
+                                                    {presence === 'composing' ? 'escribiendo...' : presence === 'recording' ? 'grabando audio...' : ''}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );

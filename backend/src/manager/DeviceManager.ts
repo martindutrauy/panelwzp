@@ -2238,9 +2238,16 @@ export class DeviceManager {
                         }
                     }
 
+                    // Priorizar: customName (nombre personalizado) > name (pushName de WhatsApp) > número
+                    const displayName = c.customName 
+                        ? String(c.customName).trim() 
+                        : (String(c.name || '').trim() || c.waChatId.split('@')[0]);
+                    
                     return {
                         id: c.waChatId,
-                        name: String(c.name || '').trim() || c.waChatId.split('@')[0],
+                        name: displayName,
+                        originalName: c.name || null, // Guardar el nombre original de WhatsApp
+                        customName: c.customName || null, // Nombre personalizado por el usuario
                         lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now(),
                         unreadCount: Number(c.unreadCount || 0),
                         isGroup: Boolean(c.isGroup),
@@ -2609,6 +2616,62 @@ export class DeviceManager {
         console.log(`[${deviceId}] Dispositivo eliminado completamente`);
 
         return { success: true, message: 'Dispositivo eliminado' };
+    }
+
+    // ========== RENOMBRAR CONTACTOS ==========
+    
+    public async renameChat(deviceId: string, chatId: string, customName: string | null) {
+        const prisma = getPrisma();
+        if (!prisma) {
+            throw new Error('Base de datos no disponible');
+        }
+        
+        const store = stores.get(deviceId);
+        const canonicalChatId = resolveCanonicalChatId(store, chatId);
+        
+        // Actualizar en la base de datos
+        const updated = await prisma.chat.updateMany({
+            where: { 
+                deviceId,
+                waChatId: canonicalChatId
+            },
+            data: {
+                customName: customName ? customName.trim() : null
+            }
+        });
+        
+        if (updated.count === 0) {
+            // Si no existe, intentar crearlo
+            await prisma.chat.upsert({
+                where: { deviceId_waChatId: { deviceId, waChatId: canonicalChatId } },
+                update: { customName: customName ? customName.trim() : null },
+                create: {
+                    deviceId,
+                    waChatId: canonicalChatId,
+                    name: canonicalChatId.split('@')[0],
+                    customName: customName ? customName.trim() : null,
+                    isGroup: canonicalChatId.endsWith('@g.us')
+                }
+            });
+        }
+        
+        // También actualizar en el store de memoria si existe
+        if (store) {
+            const chat = store.chats.get(canonicalChatId);
+            if (chat) {
+                // Guardar el nombre personalizado en el store de contactos
+                if (customName) {
+                    store.contacts.set(canonicalChatId, customName.trim());
+                }
+            }
+        }
+        
+        console.log(`[${deviceId}] Chat ${canonicalChatId} renombrado a: ${customName || '(sin nombre personalizado)'}`);
+        
+        return { 
+            chatId: canonicalChatId, 
+            customName: customName ? customName.trim() : null 
+        };
     }
 
     // ========== BÚSQUEDA DE MENSAJES ==========

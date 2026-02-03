@@ -31,7 +31,8 @@ model Chat {
   deviceId        String
   device          Device   @relation(fields: [deviceId], references: [id])
   waChatId        String   // WhatsApp JID
-  name            String?
+  name            String?  // Nombre original de WhatsApp (pushName)
+  customName      String?  // Nombre personalizado por el usuario (como si fuera la agenda)
   isGroup         Boolean  @default(false)
   unreadCount     Int      @default(0)
   priorityScore   Int      @default(0)

@@ -90,6 +90,7 @@ export const ChatScalarFieldEnum = {
   deviceId: 'deviceId',
   waChatId: 'waChatId',
   name: 'name',
+  customName: 'customName',
   isGroup: 'isGroup',
   unreadCount: 'unreadCount',
   priorityScore: 'priorityScore',
@@ -160,6 +161,7 @@ export const ChatOrderByRelevanceFieldEnum = {
   deviceId: 'deviceId',
   waChatId: 'waChatId',
   name: 'name',
+  customName: 'customName',
   profilePhotoUrl: 'profilePhotoUrl'
 } as const
 

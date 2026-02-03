@@ -596,6 +596,22 @@ app.get('/api/devices/:id/messages/search', async (req, res) => {
     }
 });
 
+// Renombrar contacto (nombre personalizado como si fuera la agenda)
+app.put('/api/devices/:id/chats/:chatId/rename', async (req, res) => {
+    try {
+        const { customName } = req.body;
+        const deviceId = req.params.id;
+        const chatId = decodeURIComponent(req.params.chatId);
+        
+        const result = await deviceManager.renameChat(deviceId, chatId, customName || null);
+        audit(req, 'chat_rename', null, { deviceId, chatId, customName });
+        res.json({ success: true, ...result });
+    } catch (error: any) {
+        console.error(`[rename] Error:`, error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post('/api/devices/:id/chats/:chatId/send-text', async (req, res) => {
     try {
         const { text, quotedMessageId } = req.body;

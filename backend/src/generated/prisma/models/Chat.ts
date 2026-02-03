@@ -41,6 +41,7 @@ export type ChatMinAggregateOutputType = {
   deviceId: string | null
   waChatId: string | null
   name: string | null
+  customName: string | null
   isGroup: boolean | null
   unreadCount: number | null
   priorityScore: number | null
@@ -53,6 +54,7 @@ export type ChatMaxAggregateOutputType = {
   deviceId: string | null
   waChatId: string | null
   name: string | null
+  customName: string | null
   isGroup: boolean | null
   unreadCount: number | null
   priorityScore: number | null
@@ -65,6 +67,7 @@ export type ChatCountAggregateOutputType = {
   deviceId: number
   waChatId: number
   name: number
+  customName: number
   isGroup: number
   unreadCount: number
   priorityScore: number
@@ -89,6 +92,7 @@ export type ChatMinAggregateInputType = {
   deviceId?: true
   waChatId?: true
   name?: true
+  customName?: true
   isGroup?: true
   unreadCount?: true
   priorityScore?: true
@@ -101,6 +105,7 @@ export type ChatMaxAggregateInputType = {
   deviceId?: true
   waChatId?: true
   name?: true
+  customName?: true
   isGroup?: true
   unreadCount?: true
   priorityScore?: true
@@ -113,6 +118,7 @@ export type ChatCountAggregateInputType = {
   deviceId?: true
   waChatId?: true
   name?: true
+  customName?: true
   isGroup?: true
   unreadCount?: true
   priorityScore?: true
@@ -212,6 +218,7 @@ export type ChatGroupByOutputType = {
   deviceId: string
   waChatId: string
   name: string | null
+  customName: string | null
   isGroup: boolean
   unreadCount: number
   priorityScore: number
@@ -247,6 +254,7 @@ export type ChatWhereInput = {
   deviceId?: Prisma.StringFilter<"Chat"> | string
   waChatId?: Prisma.StringFilter<"Chat"> | string
   name?: Prisma.StringNullableFilter<"Chat"> | string | null
+  customName?: Prisma.StringNullableFilter<"Chat"> | string | null
   isGroup?: Prisma.BoolFilter<"Chat"> | boolean
   unreadCount?: Prisma.IntFilter<"Chat"> | number
   priorityScore?: Prisma.IntFilter<"Chat"> | number
@@ -261,6 +269,7 @@ export type ChatOrderByWithRelationInput = {
   deviceId?: Prisma.SortOrder
   waChatId?: Prisma.SortOrder
   name?: Prisma.SortOrderInput | Prisma.SortOrder
+  customName?: Prisma.SortOrderInput | Prisma.SortOrder
   isGroup?: Prisma.SortOrder
   unreadCount?: Prisma.SortOrder
   priorityScore?: Prisma.SortOrder
@@ -280,6 +289,7 @@ export type ChatWhereUniqueInput = Prisma.AtLeast<{
   deviceId?: Prisma.StringFilter<"Chat"> | string
   waChatId?: Prisma.StringFilter<"Chat"> | string
   name?: Prisma.StringNullableFilter<"Chat"> | string | null
+  customName?: Prisma.StringNullableFilter<"Chat"> | string | null
   isGroup?: Prisma.BoolFilter<"Chat"> | boolean
   unreadCount?: Prisma.IntFilter<"Chat"> | number
   priorityScore?: Prisma.IntFilter<"Chat"> | number
@@ -294,6 +304,7 @@ export type ChatOrderByWithAggregationInput = {
   deviceId?: Prisma.SortOrder
   waChatId?: Prisma.SortOrder
   name?: Prisma.SortOrderInput | Prisma.SortOrder
+  customName?: Prisma.SortOrderInput | Prisma.SortOrder
   isGroup?: Prisma.SortOrder
   unreadCount?: Prisma.SortOrder
   priorityScore?: Prisma.SortOrder
@@ -314,6 +325,7 @@ export type ChatScalarWhereWithAggregatesInput = {
   deviceId?: Prisma.StringWithAggregatesFilter<"Chat"> | string
   waChatId?: Prisma.StringWithAggregatesFilter<"Chat"> | string
   name?: Prisma.StringNullableWithAggregatesFilter<"Chat"> | string | null
+  customName?: Prisma.StringNullableWithAggregatesFilter<"Chat"> | string | null
   isGroup?: Prisma.BoolWithAggregatesFilter<"Chat"> | boolean
   unreadCount?: Prisma.IntWithAggregatesFilter<"Chat"> | number
   priorityScore?: Prisma.IntWithAggregatesFilter<"Chat"> | number
@@ -325,6 +337,7 @@ export type ChatCreateInput = {
   id?: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -339,6 +352,7 @@ export type ChatUncheckedCreateInput = {
   deviceId: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -351,6 +365,7 @@ export type ChatUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -365,6 +380,7 @@ export type ChatUncheckedUpdateInput = {
   deviceId?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -378,6 +394,7 @@ export type ChatCreateManyInput = {
   deviceId: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -389,6 +406,7 @@ export type ChatUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -401,6 +419,7 @@ export type ChatUncheckedUpdateManyInput = {
   deviceId?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -434,6 +453,7 @@ export type ChatCountOrderByAggregateInput = {
   deviceId?: Prisma.SortOrder
   waChatId?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  customName?: Prisma.SortOrder
   isGroup?: Prisma.SortOrder
   unreadCount?: Prisma.SortOrder
   priorityScore?: Prisma.SortOrder
@@ -451,6 +471,7 @@ export type ChatMaxOrderByAggregateInput = {
   deviceId?: Prisma.SortOrder
   waChatId?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  customName?: Prisma.SortOrder
   isGroup?: Prisma.SortOrder
   unreadCount?: Prisma.SortOrder
   priorityScore?: Prisma.SortOrder
@@ -463,6 +484,7 @@ export type ChatMinOrderByAggregateInput = {
   deviceId?: Prisma.SortOrder
   waChatId?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  customName?: Prisma.SortOrder
   isGroup?: Prisma.SortOrder
   unreadCount?: Prisma.SortOrder
   priorityScore?: Prisma.SortOrder
@@ -552,6 +574,7 @@ export type ChatCreateWithoutDeviceInput = {
   id?: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -564,6 +587,7 @@ export type ChatUncheckedCreateWithoutDeviceInput = {
   id?: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -606,6 +630,7 @@ export type ChatScalarWhereInput = {
   deviceId?: Prisma.StringFilter<"Chat"> | string
   waChatId?: Prisma.StringFilter<"Chat"> | string
   name?: Prisma.StringNullableFilter<"Chat"> | string | null
+  customName?: Prisma.StringNullableFilter<"Chat"> | string | null
   isGroup?: Prisma.BoolFilter<"Chat"> | boolean
   unreadCount?: Prisma.IntFilter<"Chat"> | number
   priorityScore?: Prisma.IntFilter<"Chat"> | number
@@ -617,6 +642,7 @@ export type ChatCreateWithoutMessagesInput = {
   id?: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -630,6 +656,7 @@ export type ChatUncheckedCreateWithoutMessagesInput = {
   deviceId: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -657,6 +684,7 @@ export type ChatUpdateWithoutMessagesInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -670,6 +698,7 @@ export type ChatUncheckedUpdateWithoutMessagesInput = {
   deviceId?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -681,6 +710,7 @@ export type ChatCreateManyDeviceInput = {
   id?: string
   waChatId: string
   name?: string | null
+  customName?: string | null
   isGroup?: boolean
   unreadCount?: number
   priorityScore?: number
@@ -692,6 +722,7 @@ export type ChatUpdateWithoutDeviceInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -704,6 +735,7 @@ export type ChatUncheckedUpdateWithoutDeviceInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -716,6 +748,7 @@ export type ChatUncheckedUpdateManyWithoutDeviceInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   waChatId?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
   unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
@@ -759,6 +792,7 @@ export type ChatSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   deviceId?: boolean
   waChatId?: boolean
   name?: boolean
+  customName?: boolean
   isGroup?: boolean
   unreadCount?: boolean
   priorityScore?: boolean
@@ -776,6 +810,7 @@ export type ChatSelectScalar = {
   deviceId?: boolean
   waChatId?: boolean
   name?: boolean
+  customName?: boolean
   isGroup?: boolean
   unreadCount?: boolean
   priorityScore?: boolean
@@ -783,7 +818,7 @@ export type ChatSelectScalar = {
   profilePhotoUrl?: boolean
 }
 
-export type ChatOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "deviceId" | "waChatId" | "name" | "isGroup" | "unreadCount" | "priorityScore" | "lastMessageAt" | "profilePhotoUrl", ExtArgs["result"]["chat"]>
+export type ChatOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "deviceId" | "waChatId" | "name" | "customName" | "isGroup" | "unreadCount" | "priorityScore" | "lastMessageAt" | "profilePhotoUrl", ExtArgs["result"]["chat"]>
 export type ChatInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   device?: boolean | Prisma.DeviceDefaultArgs<ExtArgs>
   messages?: boolean | Prisma.Chat$messagesArgs<ExtArgs>
@@ -801,6 +836,7 @@ export type $ChatPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     deviceId: string
     waChatId: string
     name: string | null
+    customName: string | null
     isGroup: boolean
     unreadCount: number
     priorityScore: number
@@ -1181,6 +1217,7 @@ export interface ChatFieldRefs {
   readonly deviceId: Prisma.FieldRef<"Chat", 'String'>
   readonly waChatId: Prisma.FieldRef<"Chat", 'String'>
   readonly name: Prisma.FieldRef<"Chat", 'String'>
+  readonly customName: Prisma.FieldRef<"Chat", 'String'>
   readonly isGroup: Prisma.FieldRef<"Chat", 'Boolean'>
   readonly unreadCount: Prisma.FieldRef<"Chat", 'Int'>
   readonly priorityScore: Prisma.FieldRef<"Chat", 'Int'>
