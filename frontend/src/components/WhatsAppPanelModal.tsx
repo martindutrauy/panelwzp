@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, Button, Badge, Space, Tabs, Popconfirm, message, Typography } from 'antd';
-import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings } from 'lucide-react';
+import { Modal, Button, Badge, Space, Tabs, Popconfirm, message, Typography, Upload } from 'antd';
+import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings, Upload as UploadIcon } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { BranchCard } from './BranchCard';
 import { FilePanel } from './FilePanel';
@@ -46,6 +46,11 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
     const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
     const [messageApi, contextHolder] = message.useMessage();
     const devicesRef = useRef<Device[]>([]);
+    
+    // Logo del panel
+    const [panelLogo, setPanelLogo] = useState<string | null>(() => {
+        return localStorage.getItem('panelLogo') || null;
+    });
 
     useEffect(() => {
         devicesRef.current = devices;
@@ -99,6 +104,25 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
         setPinnedDevices(prev => 
             prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]
         );
+    };
+
+    // Función para subir logo
+    const handleLogoUpload = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target?.result as string;
+            setPanelLogo(base64);
+            localStorage.setItem('panelLogo', base64);
+            messageApi.success('Logo actualizado');
+        };
+        reader.readAsDataURL(file);
+        return false; // Prevenir upload automático
+    };
+
+    const removeLogo = () => {
+        setPanelLogo(null);
+        localStorage.removeItem('panelLogo');
+        messageApi.info('Logo eliminado');
     };
 
     useEffect(() => {
@@ -454,12 +478,27 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
             styles={{ body: { padding: 20, height: '85vh', backgroundColor: '#0b141a', overflow: 'auto' } }}
             title={
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 40 }}>
-                    <Space>
-                        <Smartphone size={18} />
-                        <span>Panel WhatsApp Multi-Dispositivo</span>
-                        <span style={{ color: '#8696a0', fontSize: 12, marginLeft: 60 }}>Conectadas</span>
-                        <Badge count={connectedCount} style={{ backgroundColor: '#00a884' }} />
-                    </Space>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        {panelLogo && (
+                            <img 
+                                src={panelLogo} 
+                                alt="Logo" 
+                                style={{ 
+                                    height: 36, 
+                                    width: 'auto', 
+                                    maxWidth: 120,
+                                    objectFit: 'contain',
+                                    borderRadius: 4
+                                }} 
+                            />
+                        )}
+                        <Space>
+                            <Smartphone size={18} />
+                            <span>Panel WhatsApp Multi-Dispositivo</span>
+                            <span style={{ color: '#8696a0', fontSize: 12, marginLeft: 60 }}>Conectadas</span>
+                            <Badge count={connectedCount} style={{ backgroundColor: '#00a884' }} />
+                        </Space>
+                    </div>
                     <Space>
                         <Button type="primary" icon={<Plus size={16} />} onClick={addDevice}>
                             Agregar

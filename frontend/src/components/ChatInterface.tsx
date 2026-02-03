@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown, Popover } from 'antd';
+import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown, Popover, Upload } from 'antd';
 import { Reply, Copy } from 'lucide-react';
 import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker, Smile, Edit2 } from 'lucide-react';
 
@@ -1296,6 +1296,55 @@ export const ChatInterface = ({
                 </Popconfirm>
                 <Text type="secondary" style={{ fontSize: 11 }}>
                     Usa esto si ves nombres incorrectos o datos mezclados
+                </Text>
+            </Space>
+            <Divider />
+            <Typography.Title level={5}>Personalización</Typography.Title>
+            <Space direction="vertical" style={{ width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    {localStorage.getItem('panelLogo') && (
+                        <img 
+                            src={localStorage.getItem('panelLogo') || ''} 
+                            alt="Logo actual" 
+                            style={{ height: 40, width: 'auto', maxWidth: 100, objectFit: 'contain', borderRadius: 4, border: '1px solid #444' }} 
+                        />
+                    )}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                        {localStorage.getItem('panelLogo') ? 'Logo actual' : 'Sin logo configurado'}
+                    </Text>
+                </div>
+                <Upload
+                    accept="image/*"
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const base64 = e.target?.result as string;
+                            localStorage.setItem('panelLogo', base64);
+                            messageApi.success('Logo actualizado. Recarga la página para verlo en el header.');
+                        };
+                        reader.readAsDataURL(file);
+                        return false;
+                    }}
+                >
+                    <Button icon={<Upload />} block>
+                        📷 Subir logo
+                    </Button>
+                </Upload>
+                {localStorage.getItem('panelLogo') && (
+                    <Button 
+                        danger 
+                        block 
+                        onClick={() => {
+                            localStorage.removeItem('panelLogo');
+                            messageApi.info('Logo eliminado. Recarga la página para ver el cambio.');
+                        }}
+                    >
+                        🗑️ Eliminar logo
+                    </Button>
+                )}
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                    El logo aparecerá en el header del panel
                 </Text>
             </Space>
         </Modal>
