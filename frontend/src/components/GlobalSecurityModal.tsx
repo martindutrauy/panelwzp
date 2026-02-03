@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Divider, Input, Modal, Select, Space, Switch, Table, Tabs, Typography, message } from 'antd';
+import { Button, Divider, Input, Modal, Select, Space, Switch, Table, Tabs, Typography, message, Upload } from 'antd';
 import { apiFetch } from '../lib/runtime';
 import { getAuthUser } from '../lib/auth';
 
@@ -40,6 +40,9 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
     const [auditActor, setAuditActor] = useState<string>('ALL');
     const [auditTarget, setAuditTarget] = useState<string>('ALL');
     const [auditAction, setAuditAction] = useState('');
+
+    // Logo del panel
+    const [panelLogo, setPanelLogo] = useState<string | null>(() => localStorage.getItem('panelLogo') || null);
 
     const formatTime = (ms: number) => {
         try {
@@ -651,6 +654,102 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                     ]}
                                     pagination={{ pageSize: 10 }}
                                 />
+                            </div>
+                        )
+                    },
+                    {
+                        key: 'logo',
+                        label: '🖼️ Logo',
+                        children: (
+                            <div>
+                                <Typography.Title level={5}>Logo del Panel</Typography.Title>
+                                <Text style={{ color: '#8696a0', display: 'block', marginBottom: 16 }}>
+                                    Personaliza el panel con tu logo. Aparecerá en el header del modal principal.
+                                </Text>
+                                
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: 20, 
+                                    padding: 20, 
+                                    background: 'rgba(255,255,255,0.05)', 
+                                    borderRadius: 8,
+                                    marginBottom: 20
+                                }}>
+                                    {panelLogo ? (
+                                        <img 
+                                            src={panelLogo} 
+                                            alt="Logo actual" 
+                                            style={{ 
+                                                height: 60, 
+                                                width: 'auto', 
+                                                maxWidth: 180, 
+                                                objectFit: 'contain', 
+                                                borderRadius: 4, 
+                                                border: '1px solid #444' 
+                                            }} 
+                                        />
+                                    ) : (
+                                        <div style={{ 
+                                            width: 120, 
+                                            height: 60, 
+                                            border: '2px dashed #444', 
+                                            borderRadius: 4, 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'center',
+                                            color: '#666'
+                                        }}>
+                                            Sin logo
+                                        </div>
+                                    )}
+                                    <div>
+                                        <Text style={{ color: panelLogo ? '#52c41a' : '#8696a0' }}>
+                                            {panelLogo ? '✓ Logo configurado' : 'No hay logo configurado'}
+                                        </Text>
+                                    </div>
+                                </div>
+
+                                <Space direction="vertical" style={{ width: '100%' }}>
+                                    <Upload
+                                        accept="image/*"
+                                        showUploadList={false}
+                                        beforeUpload={(file) => {
+                                            const reader = new FileReader();
+                                            reader.onload = (e) => {
+                                                const base64 = e.target?.result as string;
+                                                setPanelLogo(base64);
+                                                localStorage.setItem('panelLogo', base64);
+                                                messageApi.success('Logo actualizado correctamente');
+                                            };
+                                            reader.readAsDataURL(file);
+                                            return false;
+                                        }}
+                                    >
+                                        <Button type="primary" style={{ width: 200 }}>
+                                            📷 Subir logo
+                                        </Button>
+                                    </Upload>
+                                    
+                                    {panelLogo && (
+                                        <Button 
+                                            danger 
+                                            style={{ width: 200 }}
+                                            onClick={() => {
+                                                setPanelLogo(null);
+                                                localStorage.removeItem('panelLogo');
+                                                messageApi.info('Logo eliminado');
+                                            }}
+                                        >
+                                            🗑️ Eliminar logo
+                                        </Button>
+                                    )}
+                                </Space>
+
+                                <Divider />
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                    Formatos soportados: PNG, JPG, GIF, SVG. El logo se guarda en tu navegador.
+                                </Text>
                             </div>
                         )
                     },
