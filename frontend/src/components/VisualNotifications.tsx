@@ -22,10 +22,16 @@ const notifyListeners = () => {
 };
 
 export const addVisualNotification = (notif: VisualNotification) => {
+    console.log('[VisualNotifications] addVisualNotification llamado:', notif);
+    
     // Evitar duplicados
-    if (notifications.some(n => n.id === notif.id)) return;
+    if (notifications.some(n => n.id === notif.id)) {
+        console.log('[VisualNotifications] Notificación duplicada, ignorando');
+        return;
+    }
     
     notifications = [notif, ...notifications].slice(0, 8); // Máximo 8 notificaciones
+    console.log('[VisualNotifications] Total notificaciones:', notifications.length);
     notifyListeners();
     
     // Auto-remover después de 8 segundos
@@ -61,6 +67,8 @@ export const useVisualNotifications = () => {
 // Componente de notificaciones visuales
 export const VisualNotificationsOverlay: React.FC = () => {
     const notifs = useVisualNotifications();
+    
+    console.log('[VisualNotificationsOverlay] Renderizando con', notifs.length, 'notificaciones');
     
     if (notifs.length === 0) return null;
     

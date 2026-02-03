@@ -197,13 +197,49 @@ export const BranchCard: React.FC<BranchCardProps> = ({ device, onOpenFull, onRe
         if (!socket) return;
         
         const handleNewMessage = (data: any) => {
-            if (data.deviceId === device.id && !data.msg.fromMe) {
+            if (data.deviceId !== device.id) return;
+            
+            const msg = data.msg || {};
+            const chatId = data.chatId || '';
+            
+            // Incrementar contador solo si no es mensaje propio
+            if (!msg.fromMe) {
                 setTotalUnread(prev => prev + 1);
                 
                 // Activar animación de notificación
                 setIsNotified(true);
                 setTimeout(() => setIsNotified(false), 1500);
             }
+            
+            // Actualizar la lista de chats con el nuevo mensaje
+            setChats(prevChats => {
+                const existingIndex = prevChats.findIndex(c => c.id === chatId);
+                const senderName = msg.senderName || chatId.split('@')[0] || 'Desconocido';
+                
+                const updatedChat: Chat = {
+                    id: chatId,
+                    name: existingIndex >= 0 ? prevChats[existingIndex].name : senderName,
+                    lastMessageTime: msg.timestamp || Date.now(),
+                    unreadCount: existingIndex >= 0 
+                        ? (msg.fromMe ? prevChats[existingIndex].unreadCount : prevChats[existingIndex].unreadCount + 1)
+                        : (msg.fromMe ? 0 : 1),
+                    isGroup: chatId.includes('@g.us'),
+                    profilePhotoUrl: existingIndex >= 0 ? prevChats[existingIndex].profilePhotoUrl : null,
+                    lastMessage: msg.text || null,
+                    lastMessageType: msg.type || 'text',
+                    lastMessageFromMe: msg.fromMe || false,
+                    lastMessageMedia: msg.media || null
+                };
+                
+                // Si existe, actualizar y mover al principio
+                if (existingIndex >= 0) {
+                    const newChats = prevChats.filter((_, i) => i !== existingIndex);
+                    return [updatedChat, ...newChats].slice(0, 5);
+                }
+                
+                // Si no existe, agregar al principio
+                return [updatedChat, ...prevChats].slice(0, 5);
+            });
         };
 
         const handleUnreadUpdate = (data: any) => {
