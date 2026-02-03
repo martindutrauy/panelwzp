@@ -2314,7 +2314,14 @@ export class DeviceManager {
                         };
                     });
                     
-                    // ========== DEDUPLICACIÓN DE DATOS DE PRISMA ==========
+                    // ========== LOGGING DETALLADO PARA DIAGNÓSTICO ==========
+                    console.log(`[${deviceId}] === ANÁLISIS DE CHATS ===`);
+                    for (const chat of mappedChats) {
+                        const key = getChatKey(chat.id);
+                        console.log(`[${deviceId}]   ID: ${chat.id} | Key: ${key} | Name: "${chat.name}"`);
+                    }
+                    
+                    // ========== PASO 1: DEDUPLICACIÓN POR ID ==========
                     // La DB puede tener múltiples registros del mismo contacto
                     // (ej: 123456@s.whatsapp.net y 123456:0@lid)
                     const seenKeys = new Map<string, typeof mappedChats[0]>();
@@ -2324,12 +2331,11 @@ export class DeviceManager {
                         const existing = seenKeys.get(key);
                         
                         if (existing) {
-                            // Ya existe - decidir cuál mantener
+                            console.log(`[${deviceId}] Duplicado por ID detectado: ${chat.id} vs ${existing.id}`);
                             const existingHasRealName = existing.name && !/^\d+$/.test(existing.name);
                             const chatHasRealName = chat.name && !/^\d+$/.test(chat.name);
                             
                             if (chat.lastMessageTime > existing.lastMessageTime) {
-                                // El nuevo es más reciente
                                 if (existingHasRealName && !chatHasRealName) {
                                     seenKeys.set(key, { ...chat, name: existing.name });
                                 } else {
@@ -2343,11 +2349,42 @@ export class DeviceManager {
                         }
                     }
                     
+                    const deduplicatedById = Array.from(seenKeys.values());
+                    console.log(`[${deviceId}] Después de dedup por ID: ${mappedChats.length} -> ${deduplicatedById.length}`);
+                    
+                    // ========== PASO 2: DEDUPLICACIÓN POR NOMBRE ==========
+                    // Eliminar duplicados que tienen exactamente el mismo nombre
+                    // (pueden ser el mismo contacto con diferentes IDs de WhatsApp)
+                    const seenNames = new Map<string, typeof mappedChats[0]>();
+                    
+                    for (const chat of deduplicatedById) {
+                        // Normalizar nombre: minúsculas, sin espacios extra
+                        const normalizedName = (chat.name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+                        
+                        // No deduplicar números (pueden ser contactos diferentes sin nombre)
+                        if (/^\d+$/.test(normalizedName) || normalizedName === '') {
+                            // Es un número o vacío, usar el ID como clave para no mezclar
+                            seenNames.set(chat.id, chat);
+                            continue;
+                        }
+                        
+                        const existing = seenNames.get(normalizedName);
+                        if (existing) {
+                            console.log(`[${deviceId}] Duplicado por NOMBRE detectado: "${chat.name}" (${chat.id}) vs "${existing.name}" (${existing.id})`);
+                            // Mantener el más reciente
+                            if (chat.lastMessageTime > existing.lastMessageTime) {
+                                seenNames.set(normalizedName, chat);
+                            }
+                        } else {
+                            seenNames.set(normalizedName, chat);
+                        }
+                    }
+                    
                     // Ordenar por tiempo y devolver
-                    const deduplicatedFromDB = Array.from(seenKeys.values())
+                    const deduplicatedFromDB = Array.from(seenNames.values())
                         .sort((a, b) => b.lastMessageTime - a.lastMessageTime);
                     
-                    console.log(`[${deviceId}] Chats de DB: ${rows.length} -> ${deduplicatedFromDB.length} después de deduplicar`);
+                    console.log(`[${deviceId}] Chats de DB: ${rows.length} -> ${deduplicatedById.length} (por ID) -> ${deduplicatedFromDB.length} (por nombre)`);
                     return deduplicatedFromDB;
                 }
             }

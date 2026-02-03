@@ -11,7 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { DB_ROOT } from './config/paths';
 import { ensureDir } from './config/ensureDir';
-import { assertDatabaseConfigured } from './db/prisma';
+import { assertDatabaseConfigured, getPrisma } from './db/prisma';
 import { requireAuth } from './auth/middleware';
 import { audit, requireRoleAtLeast } from './auth/middleware';
 import { createSession, findSession, listSessions, revokeAllSessions, revokeAllSessionsExcept, revokeAllSessionsForUser, revokeSession } from './auth/sessionStore';
@@ -452,6 +452,103 @@ app.post('/api/security/emergency-unlock', requireRoleAtLeast('OWNER'), (req, re
     audit(req, 'emergency_unlock', null);
     notifyOwner({ action: 'emergency_unlock', by: (req as any).auth?.user?.id || null, at: Date.now() });
     res.json({ success: true });
+});
+
+// ========== ADMIN: LIMPIAR DUPLICADOS DE LA DB ==========
+app.post('/api/admin/cleanup-duplicates', requireRoleAtLeast('OWNER'), async (req, res) => {
+    try {
+        const prisma = getPrisma();
+        if (!prisma) {
+            return res.status(500).json({ error: 'Base de datos no configurada' });
+        }
+        
+        const { deviceId } = req.body || {};
+        
+        // Obtener todos los chats (o de un dispositivo específico)
+        const where = deviceId ? { deviceId: String(deviceId) } : {};
+        const allChats = await prisma.chat.findMany({
+            where,
+            orderBy: { lastMessageAt: 'desc' }
+        });
+        
+        console.log(`[Cleanup] Total de chats encontrados: ${allChats.length}`);
+        
+        // Agrupar por deviceId + nombre normalizado
+        const chatGroups = new Map<string, typeof allChats>();
+        
+        for (const chat of allChats) {
+            const normalizedName = (chat.name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+            
+            // No agrupar chats sin nombre o con solo números
+            if (!normalizedName || /^\d+$/.test(normalizedName)) {
+                continue;
+            }
+            
+            const groupKey = `${chat.deviceId}:${normalizedName}`;
+            const group = chatGroups.get(groupKey) || [];
+            group.push(chat);
+            chatGroups.set(groupKey, group);
+        }
+        
+        // Encontrar grupos con duplicados
+        const duplicateGroups = Array.from(chatGroups.entries())
+            .filter(([_, group]) => group.length > 1);
+        
+        console.log(`[Cleanup] Grupos con duplicados: ${duplicateGroups.length}`);
+        
+        let deletedCount = 0;
+        const deletedIds: string[] = [];
+        
+        for (const [groupKey, group] of duplicateGroups) {
+            // Ordenar por fecha más reciente primero
+            group.sort((a, b) => {
+                const timeA = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+                const timeB = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+                return timeB - timeA;
+            });
+            
+            // Mantener el primero (más reciente), eliminar los demás
+            const keep = group[0];
+            const toDelete = group.slice(1);
+            
+            if (!keep || toDelete.length === 0) continue;
+            
+            console.log(`[Cleanup] Grupo "${groupKey}": manteniendo ${keep.waChatId}, eliminando ${toDelete.length} duplicados`);
+            
+            for (const chat of toDelete) {
+                try {
+                    // Primero eliminar mensajes asociados
+                    await prisma.message.deleteMany({
+                        where: { chatId: chat.id }
+                    });
+                    
+                    // Luego eliminar el chat
+                    await prisma.chat.delete({
+                        where: { id: chat.id }
+                    });
+                    
+                    deletedCount++;
+                    deletedIds.push(chat.waChatId);
+                    console.log(`[Cleanup] Eliminado: ${chat.waChatId} (${chat.name})`);
+                } catch (err: any) {
+                    console.error(`[Cleanup] Error eliminando ${chat.waChatId}:`, err.message);
+                }
+            }
+        }
+        
+        audit(req, 'cleanup_duplicates', null, { deletedCount, deviceId: deviceId || 'all' });
+        
+        res.json({
+            success: true,
+            message: `Se eliminaron ${deletedCount} chats duplicados`,
+            deletedCount,
+            deletedIds,
+            groupsProcessed: duplicateGroups.length
+        });
+    } catch (error: any) {
+        console.error('[Cleanup] Error:', error);
+        res.status(500).json({ error: error?.message || 'Error al limpiar duplicados' });
+    }
 });
 
 // REST Routes
