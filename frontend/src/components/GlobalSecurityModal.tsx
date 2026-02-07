@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Divider, Input, Modal, Select, Space, Switch, Table, Tabs, Typography, message } from 'antd';
+import { Button, Divider, Input, Modal, Select, Space, Switch, Table, Tabs, Typography, message, Upload } from 'antd';
 import { apiFetch } from '../lib/runtime';
 import { getAuthUser } from '../lib/auth';
 
@@ -15,12 +15,6 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
     const [confirmNewPassword, setConfirmNewPassword] = useState('');
     const [changingPassword, setChangingPassword] = useState(false);
 
-    const [otpInitSecret, setOtpInitSecret] = useState('');
-    const [otpAuthUrl, setOtpAuthUrl] = useState('');
-    const [otpCode, setOtpCode] = useState('');
-    const [otpPassword, setOtpPassword] = useState('');
-    const [otpBusy, setOtpBusy] = useState(false);
-
     const [users, setUsers] = useState<any[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(false);
     const [createUsername, setCreateUsername] = useState('');
@@ -33,8 +27,22 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
     const [loadingSessions, setLoadingSessions] = useState(false);
     const [revokingAll, setRevokingAll] = useState(false);
 
+    const [userStats, setUserStats] = useState<any[]>([]);
+    const [loadingUserStats, setLoadingUserStats] = useState(false);
+    const [statsRole, setStatsRole] = useState<'ALL' | 'OWNER' | 'ADMIN' | 'USER'>('ALL');
+    const [statsQ, setStatsQ] = useState('');
+
     const [audit, setAudit] = useState<any[]>([]);
     const [loadingAudit, setLoadingAudit] = useState(false);
+    const [auditLimit, setAuditLimit] = useState(2000);
+    const [auditFrom, setAuditFrom] = useState('');
+    const [auditTo, setAuditTo] = useState('');
+    const [auditActor, setAuditActor] = useState<string>('ALL');
+    const [auditTarget, setAuditTarget] = useState<string>('ALL');
+    const [auditAction, setAuditAction] = useState('');
+
+    // Logo del panel
+    const [panelLogo, setPanelLogo] = useState<string | null>(() => localStorage.getItem('panelLogo') || null);
 
     const formatTime = (ms: number) => {
         try {
@@ -42,6 +50,46 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
         } catch {
             return String(ms);
         }
+    };
+
+    const formatDuration = (ms: number) => {
+        const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        if (h > 0) return `${h}h ${m}m`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
+    };
+
+    const downloadExcel = (fileName: string, rows: Record<string, any>[]) => {
+        const escapeHtml = (v: any) => {
+            const s = v === null || v === undefined ? '' : String(v);
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        };
+        const headerSet = new Set<string>();
+        const headers: string[] = [];
+        for (const r of rows || []) {
+            for (const k of Object.keys(r || {})) {
+                if (headerSet.has(k)) continue;
+                headerSet.add(k);
+                headers.push(k);
+            }
+        }
+        const head = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
+        const body = (rows || [])
+            .map((r) => `<tr>${headers.map((h) => `<td>${escapeHtml((r as any)?.[h])}</td>`).join('')}</tr>`)
+            .join('');
+        const html = `\ufeff<html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`;
+        const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
     };
 
     const loadMe = async () => {
@@ -88,11 +136,33 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
         }
     };
 
+    const loadUserStats = async () => {
+        if (loadingUserStats) return;
+        setLoadingUserStats(true);
+        try {
+            const res = await apiFetch('/api/security/stats/users');
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(String(data?.error || 'Error al cargar estadísticas'));
+            setUserStats(Array.isArray(data?.users) ? data.users : []);
+        } catch (e: any) {
+            messageApi.error(String(e?.message || 'Error al cargar estadísticas'));
+        } finally {
+            setLoadingUserStats(false);
+        }
+    };
+
     const loadAudit = async () => {
         if (loadingAudit) return;
         setLoadingAudit(true);
         try {
-            const res = await apiFetch('/api/security/audit?limit=200');
+            const p = new URLSearchParams();
+            p.set('limit', String(auditLimit));
+            if (auditFrom.trim()) p.set('from', auditFrom.trim());
+            if (auditTo.trim()) p.set('to', auditTo.trim());
+            if (auditActor !== 'ALL') p.set('actorUserId', auditActor);
+            if (auditTarget !== 'ALL') p.set('targetUserId', auditTarget);
+            if (auditAction.trim()) p.set('action', auditAction.trim());
+            const res = await apiFetch(`/api/security/audit/query?${p.toString()}`);
             const data = await res.json().catch(() => ([]));
             if (!res.ok) throw new Error('Error al cargar logs');
             setAudit(Array.isArray(data) ? data : []);
@@ -107,6 +177,7 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
         if (!open) return;
         void loadMe();
         void loadSessions();
+        if (me?.role === 'ADMIN' || me?.role === 'OWNER') void loadUserStats();
         void loadAudit();
         if (me?.role === 'ADMIN' || me?.role === 'OWNER') void loadUsers();
     }, [open]);
@@ -145,58 +216,6 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
         }
     };
 
-    const start2faSetup = async () => {
-        if (otpBusy) return;
-        setOtpBusy(true);
-        try {
-            const res = await apiFetch('/api/security/2fa/init', { method: 'POST' });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(String(data?.error || 'Error al iniciar 2FA'));
-            setOtpInitSecret(String(data?.secret || ''));
-            setOtpAuthUrl(String(data?.otpauthUrl || ''));
-            messageApi.success('2FA listo para configurar');
-        } catch (e: any) {
-            messageApi.error(String(e?.message || 'Error al iniciar 2FA'));
-        } finally {
-            setOtpBusy(false);
-        }
-    };
-
-    const confirm2faSetup = async () => {
-        if (otpBusy) return;
-        if (!otpInitSecret) {
-            messageApi.error('Primero generá el secreto');
-            return;
-        }
-        if (!otpPassword.trim()) {
-            messageApi.error('Ingresá tu contraseña actual');
-            return;
-        }
-        if (!otpCode.trim()) {
-            messageApi.error('Ingresá el código 2FA');
-            return;
-        }
-        setOtpBusy(true);
-        try {
-            const res = await apiFetch('/api/security/2fa/confirm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ secret: otpInitSecret, code: otpCode, currentPassword: otpPassword })
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(String(data?.error || 'Error al confirmar 2FA'));
-            messageApi.success('2FA activado. Vas a tener que volver a iniciar sesión.');
-            setOtpInitSecret('');
-            setOtpAuthUrl('');
-            setOtpCode('');
-            setOtpPassword('');
-        } catch (e: any) {
-            messageApi.error(String(e?.message || 'Error al confirmar 2FA'));
-        } finally {
-            setOtpBusy(false);
-        }
-    };
-
     const canManageUsers = me?.role === 'OWNER' || me?.role === 'ADMIN';
     const canEmergency = me?.role === 'OWNER';
 
@@ -205,13 +224,13 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
             { title: 'Usuario', dataIndex: 'username', key: 'username' },
             { title: 'Email', dataIndex: 'email', key: 'email', render: (v: any) => v || '-' },
             { title: 'Rol', dataIndex: 'role', key: 'role' },
-            { title: '2FA', key: 'twoFactorEnabled', render: (_: any, r: any) => (r.twoFactorEnabled ? 'Sí' : 'No') },
             {
                 title: 'Activo',
                 key: 'disabled',
                 render: (_: any, r: any) => (
                     <Switch
                         checked={!r.disabled}
+                        disabled={me?.role === 'ADMIN' && r.role !== 'USER'}
                         onChange={async (checked) => {
                             try {
                                 const res = await apiFetch(`/api/security/users/${r.id}`, {
@@ -261,6 +280,23 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                         <Button
                             size="small"
                             onClick={async () => {
+                                try {
+                                    const res = await apiFetch(`/api/security/users/${r.id}/close-sessions`, { method: 'POST' });
+                                    const data = await res.json().catch(() => ({}));
+                                    if (!res.ok) throw new Error(String(data?.error || 'Error'));
+                                    messageApi.success('Sesiones cerradas');
+                                    void loadSessions();
+                                } catch (e: any) {
+                                    messageApi.error(String(e?.message || 'Error'));
+                                }
+                            }}
+                        >
+                            Cerrar sesiones
+                        </Button>
+                        <Button
+                            size="small"
+                            disabled={me?.role === 'ADMIN' && r.role !== 'USER'}
+                            onClick={async () => {
                                 const np = prompt('Nueva contraseña');
                                 if (!np) return;
                                 try {
@@ -279,6 +315,27 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                         >
                             Reset Pass
                         </Button>
+                        <Button
+                            danger
+                            size="small"
+                            disabled={me?.role === 'ADMIN' && r.role !== 'USER'}
+                            onClick={async () => {
+                                const ok = window.confirm(`Eliminar usuario ${r.username}?`);
+                                if (!ok) return;
+                                try {
+                                    const res = await apiFetch(`/api/security/users/${r.id}`, { method: 'DELETE' });
+                                    const data = await res.json().catch(() => ({}));
+                                    if (!res.ok) throw new Error(String(data?.error || 'Error'));
+                                    messageApi.success('Usuario eliminado');
+                                    void loadUsers();
+                                    void loadSessions();
+                                } catch (e: any) {
+                                    messageApi.error(String(e?.message || 'Error'));
+                                }
+                            }}
+                        >
+                            Eliminar
+                        </Button>
                     </Space>
                 )
             }
@@ -288,7 +345,8 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
     const sessionColumns = useMemo(() => {
         return [
             { title: 'Session', dataIndex: 'id', key: 'id', width: 120, render: (v: any) => String(v).slice(0, 8) },
-            { title: 'User', dataIndex: 'userId', key: 'userId', width: 120 },
+            { title: 'Usuario', key: 'user', width: 180, render: (_: any, r: any) => `${r?.user?.username || r.userId} (${r?.user?.role || '-'})` },
+            { title: 'Inicio', dataIndex: 'createdAt', key: 'createdAt', render: (v: any) => formatTime(Number(v) || 0) },
             { title: 'Último', dataIndex: 'lastSeenAt', key: 'lastSeenAt', render: (v: any) => formatTime(Number(v) || 0) },
             { title: 'IP', dataIndex: 'ip', key: 'ip', render: (v: any) => v || '-' },
             { title: 'UA', dataIndex: 'userAgent', key: 'userAgent', render: (v: any) => (v ? String(v).slice(0, 40) : '-') },
@@ -319,6 +377,21 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
         ];
     }, [sessions]);
 
+    const filteredUserStats = useMemo(() => {
+        const q = statsQ.trim().toLowerCase();
+        return (userStats || []).filter((r: any) => {
+            if (statsRole !== 'ALL' && String(r?.role || '') !== statsRole) return false;
+            if (!q) return true;
+            const hay = `${r?.username || ''} ${r?.email || ''} ${r?.role || ''}`.toLowerCase();
+            return hay.includes(q);
+        });
+    }, [userStats, statsRole, statsQ]);
+
+    const userOptions = useMemo(() => {
+        const base = (users || []).map((u: any) => ({ value: String(u.id), label: `${u.username} (${u.role})` }));
+        return [{ value: 'ALL', label: 'Todos' }, ...base];
+    }, [users]);
+
     return (
         <Modal open={open} title="Seguridad" onCancel={onClose} footer={null} width={900}>
             {contextHolder}
@@ -347,24 +420,6 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                         </Button>
                                     </Space>
                                 )}
-                                <Divider />
-                                <Typography.Title level={5}>2FA (TOTP)</Typography.Title>
-                                <Space direction="vertical" style={{ width: 520 }}>
-                                    <Button onClick={start2faSetup} loading={otpBusy}>
-                                        Generar secreto 2FA
-                                    </Button>
-                                    {otpInitSecret && (
-                                        <>
-                                            <Text copyable>{otpInitSecret}</Text>
-                                            <Text copyable>{otpAuthUrl}</Text>
-                                            <Input.Password value={otpPassword} onChange={(e) => setOtpPassword(e.target.value)} placeholder="Contraseña actual" />
-                                            <Input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="Código 2FA (6 dígitos)" />
-                                            <Button type="primary" onClick={confirm2faSetup} loading={otpBusy}>
-                                                Confirmar 2FA
-                                            </Button>
-                                        </>
-                                    )}
-                                </Space>
                             </div>
                         )
                     },
@@ -383,10 +438,12 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                                   value={createRole}
                                                   onChange={(v) => setCreateRole(v)}
                                                   style={{ width: 120 }}
-                                                  options={[
-                                                      { value: 'USER', label: 'USER' },
-                                                      { value: 'ADMIN', label: 'ADMIN' }
-                                                  ]}
+                                                  options={me?.role === 'OWNER'
+                                                      ? [
+                                                            { value: 'USER', label: 'USER' },
+                                                            { value: 'ADMIN', label: 'ADMIN' }
+                                                        ]
+                                                      : [{ value: 'USER', label: 'USER' }]}
                                                   disabled={me?.role !== 'OWNER'}
                                               />
                                               <Input.Password value={createPassword} onChange={(e) => setCreatePassword(e.target.value)} placeholder="password" style={{ width: 200 }} />
@@ -407,7 +464,7 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                                               body: JSON.stringify({
                                                                   username: createUsername,
                                                                   email: createEmail.trim() || undefined,
-                                                                  role: createRole,
+                                                                  role: me?.role === 'OWNER' ? createRole : 'USER',
                                                                   password: createPassword
                                                               })
                                                           });
@@ -474,6 +531,78 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                         )
                     },
                     {
+                        key: 'stats',
+                        label: 'Estadísticas',
+                        children: (
+                            <div>
+                                <Space style={{ marginBottom: 12 }}>
+                                    <Button onClick={loadUserStats} loading={loadingUserStats}>
+                                        Recargar
+                                    </Button>
+                                    <Select
+                                        value={statsRole}
+                                        style={{ width: 140 }}
+                                        onChange={(v) => setStatsRole(v)}
+                                        options={[
+                                            { value: 'ALL', label: 'Todos' },
+                                            { value: 'OWNER', label: 'OWNER' },
+                                            { value: 'ADMIN', label: 'ADMIN' },
+                                            { value: 'USER', label: 'USER' }
+                                        ]}
+                                    />
+                                    <Input
+                                        value={statsQ}
+                                        onChange={(e) => setStatsQ(e.target.value)}
+                                        placeholder="Buscar usuario"
+                                        style={{ width: 220 }}
+                                    />
+                                    <Button
+                                        onClick={() => {
+                                            const rows = filteredUserStats.map((r: any) => ({
+                                                username: r.username,
+                                                role: r.role,
+                                                messagesSent: r.messagesSent,
+                                                quickRepliesUsed: r.quickRepliesUsed,
+                                                responseAvgSec: r.responseAvgMs ? Math.round(Number(r.responseAvgMs) / 1000) : '',
+                                                responseSamples: r.responseSamples,
+                                                connectedCurrent: formatDuration(Number(r.connectedMsCurrent) || 0),
+                                                connectedTotal: formatDuration(Number(r.connectedMsTotal) || 0),
+                                                activeSessions: r.activeSessions,
+                                                lastSeenAt: r.lastSeenAt ? formatTime(Number(r.lastSeenAt)) : ''
+                                            }));
+                                            downloadExcel(`estadisticas-usuarios.xls`, rows);
+                                        }}
+                                    >
+                                        Exportar Excel
+                                    </Button>
+                                    <Text style={{ color: '#8696a0' }}>Mensajes enviados, tiempos y uso de respuestas rápidas.</Text>
+                                </Space>
+                                <Table
+                                    rowKey="id"
+                                    loading={loadingUserStats}
+                                    dataSource={filteredUserStats}
+                                    columns={[
+                                        { title: 'Usuario', dataIndex: 'username', key: 'username' },
+                                        { title: 'Rol', dataIndex: 'role', key: 'role', width: 90 },
+                                        { title: 'Conectado', dataIndex: 'connectedMsCurrent', key: 'connectedMsCurrent', render: (v: any) => formatDuration(Number(v) || 0) },
+                                        { title: 'Total', dataIndex: 'connectedMsTotal', key: 'connectedMsTotal', render: (v: any) => formatDuration(Number(v) || 0) },
+                                        { title: 'Sesiones', dataIndex: 'activeSessions', key: 'activeSessions', width: 90 },
+                                        { title: 'Msgs', dataIndex: 'messagesSent', key: 'messagesSent', width: 80 },
+                                        { title: 'Resp. rápidas', dataIndex: 'quickRepliesUsed', key: 'quickRepliesUsed', width: 120 },
+                                        {
+                                            title: 'Prom. respuesta',
+                                            dataIndex: 'responseAvgMs',
+                                            key: 'responseAvgMs',
+                                            render: (v: any, r: any) => (v ? `${Math.round(Number(v) / 1000)}s (${Number(r?.responseSamples || 0)})` : '-')
+                                        },
+                                        { title: 'Último', dataIndex: 'lastSeenAt', key: 'lastSeenAt', render: (v: any) => (v ? formatTime(Number(v)) : '-') }
+                                    ]}
+                                    pagination={{ pageSize: 10 }}
+                                />
+                            </div>
+                        )
+                    },
+                    {
                         key: 'logs',
                         label: 'Logs',
                         children: (
@@ -481,6 +610,33 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                 <Space style={{ marginBottom: 12 }}>
                                     <Button onClick={loadAudit} loading={loadingAudit}>
                                         Recargar
+                                    </Button>
+                                    <Input
+                                        type="number"
+                                        value={String(auditLimit)}
+                                        onChange={(e) => setAuditLimit(Math.max(100, Math.min(10000, Number(e.target.value) || 2000)))}
+                                        style={{ width: 110 }}
+                                    />
+                                    <Input type="datetime-local" value={auditFrom} onChange={(e) => setAuditFrom(e.target.value)} style={{ width: 210 }} />
+                                    <Input type="datetime-local" value={auditTo} onChange={(e) => setAuditTo(e.target.value)} style={{ width: 210 }} />
+                                    <Select value={auditActor} onChange={(v) => setAuditActor(v)} style={{ width: 220 }} options={userOptions} />
+                                    <Select value={auditTarget} onChange={(v) => setAuditTarget(v)} style={{ width: 220 }} options={userOptions} />
+                                    <Input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="Acción contiene..." style={{ width: 180 }} />
+                                    <Button
+                                        onClick={() => {
+                                            const rows = (audit || []).map((e: any) => ({
+                                                at: e.at ? formatTime(Number(e.at)) : '',
+                                                actor: e.actor ? `${e.actor.username} (${e.actor.role})` : e.actorUserId || '',
+                                                action: e.action,
+                                                target: e.target ? `${e.target.username} (${e.target.role})` : e.targetUserId || '',
+                                                ip: e.ip || '',
+                                                userAgent: e.userAgent || '',
+                                                meta: e.meta ? JSON.stringify(e.meta) : ''
+                                            }));
+                                            downloadExcel(`logs.xls`, rows);
+                                        }}
+                                    >
+                                        Exportar Excel
                                     </Button>
                                     <Text style={{ color: '#8696a0' }}>Inmutables (no se borran desde la UI)</Text>
                                 </Space>
@@ -490,13 +646,110 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                     dataSource={audit}
                                     columns={[
                                         { title: 'Fecha', dataIndex: 'at', key: 'at', render: (v: any) => formatTime(Number(v) || 0) },
-                                        { title: 'Actor', dataIndex: 'actorUserId', key: 'actorUserId', render: (v: any) => v || '-' },
+                                        { title: 'Actor', key: 'actor', render: (_: any, r: any) => (r?.actor ? `${r.actor.username} (${r.actor.role})` : r.actorUserId || '-') },
                                         { title: 'Acción', dataIndex: 'action', key: 'action' },
-                                        { title: 'Target', dataIndex: 'targetUserId', key: 'targetUserId', render: (v: any) => v || '-' },
-                                        { title: 'IP', dataIndex: 'ip', key: 'ip', render: (v: any) => v || '-' }
+                                        { title: 'Target', key: 'target', render: (_: any, r: any) => (r?.target ? `${r.target.username} (${r.target.role})` : r.targetUserId || '-') },
+                                        { title: 'IP', dataIndex: 'ip', key: 'ip', render: (v: any) => v || '-' },
+                                        { title: 'Meta', key: 'meta', render: (_: any, r: any) => (r?.meta ? String(JSON.stringify(r.meta)).slice(0, 80) : '-') }
                                     ]}
                                     pagination={{ pageSize: 10 }}
                                 />
+                            </div>
+                        )
+                    },
+                    {
+                        key: 'logo',
+                        label: '🖼️ Logo',
+                        children: (
+                            <div>
+                                <Typography.Title level={5}>Logo del Panel</Typography.Title>
+                                <Text style={{ color: '#8696a0', display: 'block', marginBottom: 16 }}>
+                                    Personaliza el panel con tu logo. Aparecerá en el header del modal principal.
+                                </Text>
+                                
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: 20, 
+                                    padding: 20, 
+                                    background: 'rgba(255,255,255,0.05)', 
+                                    borderRadius: 8,
+                                    marginBottom: 20
+                                }}>
+                                    {panelLogo ? (
+                                        <img 
+                                            src={panelLogo} 
+                                            alt="Logo actual" 
+                                            style={{ 
+                                                height: 60, 
+                                                width: 'auto', 
+                                                maxWidth: 180, 
+                                                objectFit: 'contain', 
+                                                borderRadius: 4, 
+                                                border: '1px solid #444' 
+                                            }} 
+                                        />
+                                    ) : (
+                                        <div style={{ 
+                                            width: 120, 
+                                            height: 60, 
+                                            border: '2px dashed #444', 
+                                            borderRadius: 4, 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'center',
+                                            color: '#666'
+                                        }}>
+                                            Sin logo
+                                        </div>
+                                    )}
+                                    <div>
+                                        <Text style={{ color: panelLogo ? '#52c41a' : '#8696a0' }}>
+                                            {panelLogo ? '✓ Logo configurado' : 'No hay logo configurado'}
+                                        </Text>
+                                    </div>
+                                </div>
+
+                                <Space direction="vertical" style={{ width: '100%' }}>
+                                    <Upload
+                                        accept="image/*"
+                                        showUploadList={false}
+                                        beforeUpload={(file) => {
+                                            const reader = new FileReader();
+                                            reader.onload = (e) => {
+                                                const base64 = e.target?.result as string;
+                                                setPanelLogo(base64);
+                                                localStorage.setItem('panelLogo', base64);
+                                                messageApi.success('Logo actualizado correctamente');
+                                            };
+                                            reader.readAsDataURL(file);
+                                            return false;
+                                        }}
+                                    >
+                                        <Button type="primary" style={{ width: 200 }}>
+                                            📷 Subir logo
+                                        </Button>
+                                    </Upload>
+                                    
+                                    {panelLogo && (
+                                        <Button 
+                                            danger 
+                                            style={{ width: 200 }}
+                                            onClick={() => {
+                                                setPanelLogo(null);
+                                                localStorage.removeItem('panelLogo');
+                                                messageApi.info('Logo eliminado');
+                                            }}
+                                        >
+                                            🗑️ Eliminar logo
+                                        </Button>
+                                    )}
+                                </Space>
+
+                                <Divider />
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                    Formatos soportados: PNG, JPG, GIF, SVG. El logo se guarda en tu navegador.
+                                </Text>
                             </div>
                         )
                     },
@@ -527,6 +780,46 @@ export const GlobalSecurityModal = ({ open, onClose }: { open: boolean; onClose:
                                           }}
                                       >
                                           Activar Emergency Lock
+                                      </Button>
+                                      
+                                      <Divider />
+                                      <Typography.Title level={5}>🔄 Reset de Cache de Dispositivos</Typography.Title>
+                                      <Text style={{ color: '#8696a0', display: 'block', marginBottom: 12 }}>
+                                          Limpia el cache de chats, contactos y mensajes de todos los dispositivos. Útil si ves nombres incorrectos o datos mezclados.
+                                      </Text>
+                                      <Button
+                                          danger
+                                          onClick={async () => {
+                                              const ok = window.confirm('¿Resetear cache de TODOS los dispositivos? Los chats se recargarán con datos frescos.');
+                                              if (!ok) return;
+                                              try {
+                                                  // Obtener lista de dispositivos
+                                                  const devRes = await apiFetch('/api/devices');
+                                                  const devices = await devRes.json();
+                                                  if (!Array.isArray(devices) || devices.length === 0) {
+                                                      messageApi.warning('No hay dispositivos para resetear');
+                                                      return;
+                                                  }
+                                                  
+                                                  let resetCount = 0;
+                                                  for (const dev of devices) {
+                                                      try {
+                                                          const res = await apiFetch(`/api/devices/${dev.id}/reset-cache`, { method: 'POST' });
+                                                          const data = await res.json();
+                                                          if (data.success) resetCount++;
+                                                      } catch {
+                                                          // Ignorar errores individuales
+                                                      }
+                                                  }
+                                                  
+                                                  messageApi.success(`Cache reseteado en ${resetCount}/${devices.length} dispositivo(s). Recargando...`);
+                                                  setTimeout(() => window.location.reload(), 2000);
+                                              } catch (e: any) {
+                                                  messageApi.error(String(e?.message || 'Error al resetear cache'));
+                                              }
+                                          }}
+                                      >
+                                          Resetear Cache de Todos los Dispositivos
                                       </Button>
                                   </div>
                               )

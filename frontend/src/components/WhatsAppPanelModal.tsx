@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, Button, Badge, Space, Tabs, Popconfirm, message, Typography } from 'antd';
-import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings } from 'lucide-react';
+import { Modal, Button, Badge, Space, Tabs, Popconfirm, message, Typography, Upload } from 'antd';
+import { Plus, Smartphone, MessageSquare, Files, FileText, BarChart3, Trash2, ArrowLeft, X, Settings, Upload as UploadIcon } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { BranchCard } from './BranchCard';
 import { FilePanel } from './FilePanel';
@@ -46,6 +46,40 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
     const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
     const [messageApi, contextHolder] = message.useMessage();
     const devicesRef = useRef<Device[]>([]);
+    
+    // Logo del panel
+    const [panelLogo, setPanelLogo] = useState<string | null>(() => {
+        return localStorage.getItem('panelLogo') || null;
+    });
+
+    // Actualizar logo cuando cambia en localStorage o cuando se abre el modal
+    useEffect(() => {
+        if (visible) {
+            const storedLogo = localStorage.getItem('panelLogo');
+            if (storedLogo !== panelLogo) {
+                setPanelLogo(storedLogo);
+            }
+        }
+        
+        // Escuchar cambios de storage desde otras pestañas/componentes
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === 'panelLogo') {
+                setPanelLogo(e.newValue);
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        
+        // También verificar periódicamente mientras el modal está visible
+        const interval = visible ? setInterval(() => {
+            const current = localStorage.getItem('panelLogo');
+            setPanelLogo(prev => prev !== current ? current : prev);
+        }, 1000) : undefined;
+        
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            if (interval) clearInterval(interval);
+        };
+    }, [visible]);
 
     useEffect(() => {
         devicesRef.current = devices;
@@ -99,6 +133,25 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
         setPinnedDevices(prev => 
             prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]
         );
+    };
+
+    // Función para subir logo
+    const handleLogoUpload = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target?.result as string;
+            setPanelLogo(base64);
+            localStorage.setItem('panelLogo', base64);
+            messageApi.success('Logo actualizado');
+        };
+        reader.readAsDataURL(file);
+        return false; // Prevenir upload automático
+    };
+
+    const removeLogo = () => {
+        setPanelLogo(null);
+        localStorage.removeItem('panelLogo');
+        messageApi.info('Logo eliminado');
     };
 
     useEffect(() => {
@@ -454,12 +507,28 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
             styles={{ body: { padding: 20, height: '85vh', backgroundColor: '#0b141a', overflow: 'auto' } }}
             title={
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 40 }}>
-                    <Space>
-                        <Smartphone size={18} />
-                        <span>Panel WhatsApp Multi-Dispositivo</span>
-                        <span style={{ color: '#8696a0', fontSize: 12, marginLeft: 60 }}>Conectadas</span>
-                        <Badge count={connectedCount} style={{ backgroundColor: '#00a884' }} />
-                    </Space>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        {panelLogo && (
+                            <img 
+                                src={panelLogo} 
+                                alt="Logo" 
+                                style={{ 
+                                    height: 180, 
+                                    width: 'auto', 
+                                    maxWidth: 600,
+                                    objectFit: 'contain',
+                                    borderRadius: 8,
+                                    filter: 'drop-shadow(0 4px 12px rgba(212, 175, 55, 0.3))'
+                                }} 
+                            />
+                        )}
+                        <Space>
+                            <Smartphone size={18} />
+                            <span>Panel WhatsApp Multi-Dispositivo</span>
+                            <span style={{ color: '#8696a0', fontSize: 12, marginLeft: 60 }}>Conectadas</span>
+                            <Badge count={connectedCount} style={{ backgroundColor: '#00a884' }} />
+                        </Space>
+                    </div>
                     <Space>
                         <Button type="primary" icon={<Plus size={16} />} onClick={addDevice}>
                             Agregar
@@ -568,6 +637,24 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
                                 </div>
                             );
                         })}
+                    </div>
+                    {/* Firma/Lema */}
+                    <div style={{
+                        marginTop: 40,
+                        paddingTop: 25,
+                        borderTop: '1px solid rgba(212, 175, 55, 0.3)',
+                        textAlign: 'center'
+                    }}>
+                        <Text style={{ 
+                            fontFamily: '"Playfair Display", Georgia, serif',
+                            fontStyle: 'italic',
+                            fontSize: 26,
+                            color: '#d4af37',
+                            letterSpacing: '1px',
+                            textShadow: '0 0 20px rgba(212, 175, 55, 0.3)'
+                        }}>
+                            Test 7/2 17:58 hs. Martin
+                        </Text>
                     </div>
                 </>
             )}

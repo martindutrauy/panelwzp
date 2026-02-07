@@ -1,6 +1,4 @@
-import crypto from 'crypto';
 import { dbPath } from '../config/paths';
-import { decrypt, encrypt } from '../utils/crypto';
 import { atomicWriteJson, safeReadJson } from './storage';
 import type { AuthUser, OwnerState } from './types';
 
@@ -31,8 +29,6 @@ export const getSessionIdleTtlMs = () => {
 const getOwnerStateDefaults = (): OwnerState => ({
     v: 1,
     tokenVersion: 0,
-    twoFactorSecretEnc: null,
-    twoFactorRequired: true,
     emergencyLock: false,
     updatedAt: Date.now()
 });
@@ -43,8 +39,6 @@ export const loadOwnerState = (): OwnerState => {
     return {
         v: 1,
         tokenVersion: Number.isFinite(parsed.tokenVersion) ? Number(parsed.tokenVersion) : 0,
-        twoFactorSecretEnc: typeof parsed.twoFactorSecretEnc === 'string' ? parsed.twoFactorSecretEnc : null,
-        twoFactorRequired: parsed.twoFactorRequired !== false,
         emergencyLock: Boolean(parsed.emergencyLock),
         updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now()
     };
@@ -52,26 +46,6 @@ export const loadOwnerState = (): OwnerState => {
 
 export const saveOwnerState = (next: OwnerState) => {
     atomicWriteJson(OWNER_STATE_FILE, next);
-};
-
-export const getOwnerTwoFactorSecret = () => {
-    const envSecret = String(process.env.OWNER_TOTP_SECRET || '').trim();
-    if (envSecret) return envSecret;
-    const st = loadOwnerState();
-    if (!st.twoFactorSecretEnc) return null;
-    const value = decrypt(st.twoFactorSecretEnc);
-    return String(value || '').trim() || null;
-};
-
-export const setOwnerTwoFactorSecret = (secretBase32: string) => {
-    const st = loadOwnerState();
-    const next: OwnerState = {
-        ...st,
-        twoFactorSecretEnc: encrypt(String(secretBase32 || '').trim()),
-        updatedAt: Date.now()
-    };
-    saveOwnerState(next);
-    return next;
 };
 
 export const rotateOwnerTokenVersion = () => {
@@ -90,20 +64,15 @@ export const setEmergencyLock = (enabled: boolean) => {
 
 export const getOwnerUser = (): AuthUser => {
     const st = loadOwnerState();
-    const secretExists = Boolean(getOwnerTwoFactorSecret());
     return {
         id: OWNER_ID,
         username: getOwnerUsername(),
         email: getOwnerEmail(),
         role: 'OWNER',
         disabled: false,
-        tokenVersion: st.tokenVersion,
-        twoFactorRequired: st.twoFactorRequired !== false,
-        twoFactorEnabled: secretExists
+        tokenVersion: st.tokenVersion
     };
 };
-
-export const createOwnerSessionId = () => crypto.randomBytes(18).toString('hex');
 
 export const isOwnerUsername = (username: string) => {
     const u = String(username || '').trim();

@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification } from 'antd';
-import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall } from 'lucide-react';
+import { Layout, List, Input, Avatar, Space, Button, Badge, Typography, Tooltip, Modal, Spin, Empty, Popconfirm, message, Radio, Divider, notification, Dropdown, Popover, Upload } from 'antd';
+import { Reply, Copy } from 'lucide-react';
+import { Search, Send, Paperclip, Mic, CheckCheck, X, Trash2, Settings, Play, PhoneCall, Image, Video, FileText, Camera, Sticker, Smile, Edit2 } from 'lucide-react';
+
+// Emojis más usados en WhatsApp organizados por categoría
+const EMOJI_CATEGORIES = {
+    'Caritas': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐'],
+    'Gestos': ['😤', '😠', '😡', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '🙈', '🙉', '🙊'],
+    'Manos': ['👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💪'],
+    'Corazones': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '♥️'],
+    'Celebración': ['🎉', '🎊', '🎈', '🎁', '🎀', '🎂', '🍰', '🧁', '🥂', '🍾', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '🎗️', '🎄', '🎃', '🎆', '🎇', '✨', '🎵', '🎶', '🎤', '🎧'],
+    'Objetos': ['📱', '💻', '⌨️', '🖥️', '📷', '📹', '🎥', '📞', '☎️', '📺', '📻', '⏰', '⌚', '💰', '💵', '💴', '💶', '💷', '💳', '🔑', '🗝️', '🔒', '🔓', '📦', '📫', '📬', '📭', '📮', '✉️', '📧'],
+    'Símbolos': ['✅', '❌', '⭕', '❗', '❓', '‼️', '⁉️', '💯', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫', '⚪', '🟤', '▶️', '⏸️', '⏹️', '⏺️', '⏭️', '⏮️', '🔀', '🔁', '🔂', '➡️', '⬅️', '⬆️', '⬇️', '↗️', '↘️', '↙️', '↖️', '🔃', '🔄']
+};
 import QRCode from 'react-qr-code';
 import { useSocket } from '../hooks/useSocket';
 import { apiFetch, assetUrl } from '../lib/runtime';
@@ -38,15 +50,27 @@ interface Message {
     source: 'panel' | 'whatsapp' | 'phone' | 'contact';
     media?: MediaMetadata | null;
     location?: { latitude: number; longitude: number; name?: string | null; address?: string | null } | null;
+    senderName?: string | null;  // Nombre del contacto de WhatsApp (pushName)
+    quotedMessage?: {            // Mensaje citado (reply)
+        id: string;
+        text: string | null;
+        senderName?: string | null;
+    } | null;
 }
 
 interface Chat {
     id: string;
     name: string;
+    originalName?: string | null;  // Nombre original de WhatsApp (pushName)
+    customName?: string | null;    // Nombre personalizado por el usuario (como agenda)
     lastMessageTime: number;
     unreadCount: number;
     isGroup: boolean;
     profilePhotoUrl?: string | null;
+    lastMessage?: string | null;
+    lastMessageType?: string;
+    lastMessageFromMe?: boolean;
+    lastMessageMedia?: { mimeType?: string; duration?: number } | null;
 }
 
 interface SearchResult {
@@ -73,6 +97,8 @@ export const ChatInterface = ({
     const [chats, setChats] = useState<Chat[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const chatsRef = useRef<Chat[]>([]);
+    // Guardar IDs de chats eliminados localmente para no volver a mostrarlos
+    const [deletedChatIds, setDeletedChatIds] = useState<Set<string>>(new Set());
     const [inputText, setInputText] = useState('');
     const [loading, setLoading] = useState(false);
     const [uploadingFile, setUploadingFile] = useState(false);
@@ -106,6 +132,146 @@ export const ChatInterface = ({
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const notificationAudioCtxRef = useRef<AudioContext | null>(null);
     const lastNotificationSoundKeyRef = useRef<string>('');
+    
+    // Estado para trackear chats con notificación activa (para animación de zumbido)
+    const [notifiedChats, setNotifiedChats] = useState<Set<string>>(new Set());
+    
+    // Estado para responder mensajes (reply/quote)
+    const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+    
+    // Estado para el selector de emojis
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [activeEmojiCategory, setActiveEmojiCategory] = useState<string>('Caritas');
+    
+    // Estado para editar nombre de contacto
+    const [editingContactName, setEditingContactName] = useState(false);
+    const [newContactName, setNewContactName] = useState('');
+    
+    // Cancelar respuesta
+    const cancelReply = () => setReplyingTo(null);
+    
+    // Insertar emoji en el texto
+    const insertEmoji = (emoji: string) => {
+        setInputText(prev => prev + emoji);
+    };
+    
+    // Guardar nombre personalizado del contacto
+    const saveContactName = async () => {
+        if (!activeChat) return;
+        
+        try {
+            const encodedChatId = encodeURIComponent(activeChat);
+            const res = await apiFetch(`/api/devices/${device.id}/chats/${encodedChatId}/rename`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customName: newContactName.trim() || null })
+            });
+            
+            const result = await res.json();
+            if (result.success) {
+                // Actualizar el chat en la lista local
+                setChats(prev => prev.map(c => 
+                    c.id === activeChat 
+                        ? { ...c, name: newContactName.trim() || c.originalName || c.id.split('@')[0], customName: newContactName.trim() || null }
+                        : c
+                ));
+                messageApi.success('Nombre guardado');
+                setEditingContactName(false);
+            } else {
+                messageApi.error(result.error || 'Error al guardar');
+            }
+        } catch (err: any) {
+            messageApi.error('Error: ' + (err.message || 'Desconocido'));
+        }
+    };
+
+    // Inyectar estilos de animación RETRO para las tarjetas de chat
+    useEffect(() => {
+        const styleId = 'chat-card-animations-retro';
+        if (document.getElementById(styleId)) return;
+        
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+            /* === TEMA RETRO - Animaciones de Chat === */
+            
+            /* Animación de zumbido vintage */
+            @keyframes chatBuzz {
+                0%, 100% { transform: translateX(0); }
+                10% { transform: translateX(-3px) rotate(-0.5deg); }
+                20% { transform: translateX(3px) rotate(0.5deg); }
+                30% { transform: translateX(-3px) rotate(-0.5deg); }
+                40% { transform: translateX(3px) rotate(0.5deg); }
+                50% { transform: translateX(-2px); }
+                60% { transform: translateX(2px); }
+                70% { transform: translateX(-1px); }
+                80% { transform: translateX(1px); }
+                90% { transform: translateX(0); }
+            }
+            
+            /* Pulso dorado vintage */
+            @keyframes chatPulse {
+                0% { background: linear-gradient(90deg, #2f261d 0%, #1a1410 50%, #2f261d 100%); }
+                25% { background: linear-gradient(90deg, rgba(201, 162, 39, 0.2) 0%, #2f261d 50%, rgba(201, 162, 39, 0.2) 100%); }
+                50% { background: linear-gradient(90deg, #2f261d 0%, rgba(201, 162, 39, 0.3) 50%, #2f261d 100%); }
+                75% { background: linear-gradient(90deg, rgba(201, 162, 39, 0.2) 0%, #2f261d 50%, rgba(201, 162, 39, 0.2) 100%); }
+                100% { background: linear-gradient(90deg, #2f261d 0%, #1a1410 50%, #2f261d 100%); }
+            }
+            
+            /* Clase para chat con notificación - estilo retro */
+            .chat-item-notified {
+                animation: chatBuzz 0.6s ease-in-out, chatPulse 1.5s ease-in-out;
+                box-shadow: 0 0 20px rgba(201, 162, 39, 0.3), inset 0 0 15px rgba(201, 162, 39, 0.05);
+                border-left: 3px solid #c9a227 !important;
+            }
+            
+            /* Hover retro para tarjetas de chat */
+            .chat-item-card {
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+                font-family: 'Crimson Text', Georgia, serif;
+            }
+            
+            .chat-item-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.08), transparent);
+                transition: left 0.5s ease;
+            }
+            
+            .chat-item-card:hover::before {
+                left: 100%;
+            }
+            
+            .chat-item-card:hover {
+                background: linear-gradient(90deg, rgba(47, 38, 29, 0.8) 0%, rgba(42, 34, 24, 0.9) 100%) !important;
+                transform: scale(1.01);
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            }
+            
+            .chat-item-card:active {
+                transform: scale(0.99);
+            }
+            
+            /* Avatar hover efecto retro */
+            .chat-item-card:hover .ant-avatar {
+                transform: scale(1.08);
+                transition: transform 0.2s ease;
+                box-shadow: 0 0 10px rgba(201, 162, 39, 0.3);
+            }
+        `;
+        document.head.appendChild(style);
+        
+        return () => {
+            const existing = document.getElementById(styleId);
+            if (existing) existing.remove();
+        };
+    }, []);
 
     useEffect(() => {
         chatsRef.current = chats;
@@ -116,6 +282,120 @@ export const ChatInterface = ({
         if (chatId.includes('@g.us')) return chatId;
         const prefix = chatId.split('@')[0] || chatId;
         return prefix.split(':')[0] || prefix;
+    };
+
+    // Formatear duración de audio (segundos -> mm:ss)
+    const formatAudioDuration = (seconds?: number) => {
+        if (!seconds || !Number.isFinite(seconds)) return '';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // Renderizar preview del último mensaje estilo WhatsApp
+    const renderLastMessagePreview = (chat: Chat) => {
+        const prefix = chat.lastMessageFromMe ? (
+            <CheckCheck size={14} color="#53bdeb" style={{ marginRight: 4, flexShrink: 0 }} />
+        ) : null;
+
+        // Si es un grupo, mostrar ícono de grupo
+        if (chat.isGroup && !chat.lastMessage && !chat.lastMessageMedia && !chat.lastMessageType) {
+            return <span>👥 Grupo</span>;
+        }
+
+        // Verificar si es un sticker por el tipo de mensaje
+        if (chat.lastMessageType === 'stickerMessage' || chat.lastMessage === 'Sticker') {
+            return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {prefix}
+                    <span style={{ fontSize: 16 }}>🎭</span>
+                    <span>Sticker</span>
+                </span>
+            );
+        }
+
+        // Si hay media
+        if (chat.lastMessageMedia?.mimeType) {
+            const mimeType = chat.lastMessageMedia.mimeType.toLowerCase();
+            
+            // Sticker (image/webp generalmente)
+            if (mimeType === 'image/webp' && !chat.lastMessage) {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <span style={{ fontSize: 16 }}>🎭</span>
+                        <span>Sticker</span>
+                    </span>
+                );
+            }
+            
+            if (mimeType.startsWith('audio/')) {
+                const duration = formatAudioDuration(chat.lastMessageMedia.duration);
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Mic size={14} color="#25D366" style={{ flexShrink: 0 }} />
+                        <span style={{ color: '#25D366' }}>
+                            {duration ? duration : 'Audio'}
+                        </span>
+                    </span>
+                );
+            }
+            
+            if (mimeType.startsWith('image/')) {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Camera size={14} style={{ flexShrink: 0 }} />
+                        <span>{chat.lastMessage || 'Foto'}</span>
+                    </span>
+                );
+            }
+            
+            if (mimeType.startsWith('video/')) {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <Video size={14} style={{ flexShrink: 0 }} />
+                        <span>{chat.lastMessage || 'Video'}</span>
+                    </span>
+                );
+            }
+            
+            // Documento u otro tipo de archivo
+            return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {prefix}
+                    <FileText size={14} style={{ flexShrink: 0 }} />
+                    <span>{chat.lastMessage || 'Documento'}</span>
+                </span>
+            );
+        }
+
+        // Mensaje de texto normal
+        if (chat.lastMessage) {
+            // Verificar si es un sticker por el texto
+            if (chat.lastMessage === 'Sticker') {
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {prefix}
+                        <span style={{ fontSize: 16 }}>🎭</span>
+                        <span>Sticker</span>
+                    </span>
+                );
+            }
+            return (
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                    {prefix}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {chat.lastMessage}
+                    </span>
+                </span>
+            );
+        }
+
+        // Sin mensaje - mostrar tipo de chat
+        return <span style={{ fontStyle: 'italic' }}>{chat.isGroup ? '👥 Grupo' : 'Sin mensajes'}</span>;
     };
 
     useEffect(() => {
@@ -167,19 +447,54 @@ export const ChatInterface = ({
     useEffect(() => {
         const fetchChats = async () => {
             try {
+                console.log(`[fetchChats] Cargando chats para ${device.id}...`);
                 const res = await apiFetch(`/api/devices/${device.id}/chats`);
-                const data = await res.json();
+                
+                if (!res.ok) {
+                    console.error(`[fetchChats] Error HTTP: ${res.status}`);
+                    return; // No borrar chats existentes en caso de error
+                }
+                
+                const text = await res.text();
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : [];
+                } catch (parseError) {
+                    console.error('[fetchChats] Error parseando JSON:', parseError);
+                    return;
+                }
+                
                 // Solo actualizar si es un array válido
                 if (Array.isArray(data)) {
-                    upsertBranchChats(device.id, data);
-                    setChats(data);
+                    // Filtrar chats eliminados localmente
+                    let filteredData = data.filter((c: Chat) => !deletedChatIds.has(c.id));
+                    
+                    // DEDUPLICACIÓN: eliminar duplicados basándose en la clave normalizada
+                    // Mantener el primer chat de cada clave (el más reciente por orden del servidor)
+                    const seenKeys = new Set<string>();
+                    filteredData = filteredData.filter((c: Chat) => {
+                        const key = getChatKey(c.id);
+                        if (seenKeys.has(key)) {
+                            console.log(`[fetchChats] Duplicado eliminado: ${c.id} (key: ${key})`);
+                            return false;
+                        }
+                        seenKeys.add(key);
+                        return true;
+                    });
+                    
+                    console.log(`[fetchChats] ${data.length} chats cargados, ${filteredData.length} después de filtrar/deduplicar`);
+                    upsertBranchChats(device.id, filteredData);
+                    setChats(filteredData);
+                } else if (data?.error) {
+                    console.error('[fetchChats] Error del servidor:', data.error);
+                    // No borrar chats existentes
                 } else {
-                    console.log('Respuesta no es un array:', data);
+                    console.log('[fetchChats] Respuesta no es un array:', data);
                     setChats([]);
                 }
             } catch (error) {
-                console.error('Error al cargar chats:', error);
-                setChats([]);
+                console.error('[fetchChats] Error de red:', error);
+                // No borrar chats existentes en caso de error de red
             }
         };
 
@@ -191,7 +506,8 @@ export const ChatInterface = ({
         } else {
             setChats([]);
         }
-    }, [device.id, currentDevice.status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [device.id, currentDevice.status, deletedChatIds.size]);
 
     // Cargar mensajes cuando se selecciona un chat
     useEffect(() => {
@@ -418,7 +734,9 @@ export const ChatInterface = ({
 
                 const incomingKey = getChatKey(data.chatId);
                 const activeKey = getChatKey(activeChat);
-                if (incomingKey && activeKey && incomingKey === activeKey) {
+                const isSameChat = incomingKey && activeKey && incomingKey === activeKey;
+                
+                if (isSameChat) {
                     if (activeChat && data.chatId && data.chatId !== activeChat) {
                         setActiveChat(data.chatId);
                     }
@@ -432,22 +750,66 @@ export const ChatInterface = ({
                     }
                 }
 
+                // Activar animación de zumbido si NO es el chat activo y NO es mensaje enviado por mí
+                if (!isSameChat && !data.msg.fromMe) {
+                    const chatIdToNotify = data.chatId;
+                    setNotifiedChats(prev => new Set(prev).add(chatIdToNotify));
+                    
+                    // Remover la notificación después de que termine la animación (1.5s)
+                    setTimeout(() => {
+                        setNotifiedChats(prev => {
+                            const newSet = new Set(prev);
+                            newSet.delete(chatIdToNotify);
+                            return newSet;
+                        });
+                    }, 1500);
+                }
+
                 // Actualizar lista de chats - unificar solo por clave segura (evita mezclar LIDs/grupos)
                 setChats(prev => {
                     const incomingKey = getChatKey(data.chatId);
-                    const existingChat = prev.find(c => getChatKey(c.id) === incomingKey);
-                    if (existingChat) {
-                        // Actualizar chat existente y moverlo al principio
-                        return [
-                            { ...existingChat, id: data.chatId, lastMessageTime: data.msg.timestamp },
-                            ...prev.filter(c => getChatKey(c.id) !== incomingKey)
-                        ];
+                    const existingIndex = prev.findIndex(c => getChatKey(c.id) === incomingKey);
+                    
+                    // Inferir tipo de mensaje
+                    const inferMessageType = (msg: any): string => {
+                        if (msg.media?.mimeType) {
+                            const mime = msg.media.mimeType;
+                            if (mime.startsWith('audio/')) return 'audio';
+                            if (mime.startsWith('image/')) return 'image';
+                            if (mime.startsWith('video/')) return 'video';
+                            return 'document';
+                        }
+                        if (msg.location) return 'location';
+                        return 'text';
+                    };
+                    
+                    const msgType = inferMessageType(data.msg);
+                    
+                    if (existingIndex >= 0) {
+                        // Chat existente - MANTENER el ID original, solo actualizar timestamp y contenido
+                        const existingChat = prev[existingIndex];
+                        const updatedChat: Chat = {
+                            ...existingChat,
+                            // CRÍTICO: NO cambiar el ID - mantener el original para evitar duplicados
+                            lastMessageTime: data.msg.timestamp,
+                            lastMessage: data.msg.text || existingChat.lastMessage,
+                            lastMessageType: msgType || existingChat.lastMessageType,
+                            lastMessageFromMe: data.msg.fromMe,
+                            unreadCount: data.msg.fromMe ? existingChat.unreadCount : existingChat.unreadCount + 1
+                        };
+                        // Mover al principio sin crear duplicados
+                        const filtered = prev.filter((_, i) => i !== existingIndex);
+                        return [updatedChat, ...filtered];
                     } else {
-                        // Agregar nuevo chat
+                        // Chat nuevo - usar el nombre del sender si está disponible
+                        const senderName = data.msg.senderName || data.chatId.split('@')[0] || 'Desconocido';
                         const newChat: Chat = {
                             id: data.chatId,
-                            name: data.chatId.replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', ''),
+                            name: senderName,
                             lastMessageTime: data.msg.timestamp,
+                            lastMessage: data.msg.text || null,
+                            lastMessageType: msgType,
+                            lastMessageFromMe: data.msg.fromMe,
                             unreadCount: data.msg.fromMe ? 0 : 1,
                             isGroup: data.chatId.includes('@g.us')
                         };
@@ -549,6 +911,7 @@ export const ChatInterface = ({
         try {
             const res = await apiFetch(`/api/devices/${device.id}/chats/${chatId}/messages`);
             const data = await res.json();
+            console.log('[loadMessages] Mensajes cargados:', data.length, 'ejemplo:', data[0]);
             setMessages(Array.isArray(data) ? data : []);
             setTimeout(() => {
                 if (scrollRef.current) {
@@ -566,7 +929,7 @@ export const ChatInterface = ({
             return;
         }
 
-        console.log('Enviando mensaje a:', activeChat, 'texto:', inputText);
+        console.log('Enviando mensaje a:', activeChat, 'texto:', inputText, replyingTo ? `(respondiendo a ${replyingTo.id})` : '');
         setLoading(true);
 
         try {
@@ -574,7 +937,10 @@ export const ChatInterface = ({
             const response = await apiFetch(`/api/devices/${device.id}/chats/${encodedChatId}/send-text`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: inputText })
+                body: JSON.stringify({ 
+                    text: inputText,
+                    quotedMessageId: replyingTo?.id || undefined
+                })
             });
 
             const result = await response.json();
@@ -584,6 +950,8 @@ export const ChatInterface = ({
                 // NO agregar mensaje localmente - el socket message:new lo hará
                 // Esto evita duplicación
                 setInputText('');
+                // Limpiar respuesta después de enviar
+                setReplyingTo(null);
             } else {
                 console.error('Error del servidor:', result.error);
             }
@@ -730,17 +1098,27 @@ export const ChatInterface = ({
 
     const handleDeleteChat = async (chatId: string) => {
         try {
-            const res = await apiFetch(`/api/devices/${device.id}/chats/${chatId}`, {
-                method: 'DELETE'
-            });
-            if (!res.ok) throw new Error('Error al eliminar chat');
+            // Primero agregar a la lista de eliminados para evitar que reaparezca
+            setDeletedChatIds(prev => new Set([...prev, chatId]));
             
+            // Eliminar de la lista local inmediatamente
             setChats(prev => prev.filter(c => c.id !== chatId));
             if (activeChat === chatId) setActiveChat(null);
+            
+            // Luego intentar eliminar del servidor
+            const res = await apiFetch(`/api/devices/${device.id}/chats/${encodeURIComponent(chatId)}`, {
+                method: 'DELETE'
+            });
+            
+            if (!res.ok) {
+                console.warn('No se pudo eliminar del servidor, pero se eliminó localmente');
+            }
+            
             messageApi.success('Chat eliminado');
         } catch (error) {
             console.error('Error eliminando chat:', error);
-            messageApi.error('No se pudo eliminar el chat');
+            // El chat ya se eliminó localmente, solo mostrar warning
+            messageApi.warning('Chat eliminado localmente');
         }
     };
 
@@ -829,6 +1207,19 @@ export const ChatInterface = ({
             onClose={() => setShowSettingsModal(false)}
         />
     );
+
+    // Estado RECONNECTING - Auto-reconectando sesión guardada
+    if (currentDevice.status === 'RECONNECTING') {
+        return (
+            <div style={{ padding: 40, textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                <Spin size="large" />
+                <h2 style={{ color: '#e9edef', marginTop: 20 }}>{currentDevice.name}</h2>
+                <p style={{ color: '#25D366', fontSize: 16 }}>Reconectando sesión guardada...</p>
+                <p style={{ color: '#8696a0', fontSize: 13 }}>Esto puede tomar unos segundos</p>
+                {settingsModalContent}
+            </div>
+        );
+    }
 
     if (currentDevice.status === 'DISCONNECTED' || currentDevice.status === 'CONNECTING' || currentDevice.status === 'PAIRING_CODE_READY') {
         const statusLabel =
@@ -932,6 +1323,88 @@ export const ChatInterface = ({
                     Cambiar contraseña
                 </Button>
             </Space>
+            <Divider />
+            <Typography.Title level={5}>Mantenimiento</Typography.Title>
+            <Space direction="vertical" style={{ width: '100%' }}>
+                <Popconfirm
+                    title="¿Resetear cache de chats?"
+                    description="Esto limpiará todos los nombres y datos en cache. Los chats se recargarán con datos frescos."
+                    onConfirm={async () => {
+                        try {
+                            const res = await apiFetch(`/api/devices/${device.id}/reset-cache`, { method: 'POST' });
+                            const data = await res.json();
+                            if (data.success) {
+                                messageApi.success('Cache reseteado. Recargando...');
+                                setChats([]);
+                                setTimeout(() => window.location.reload(), 1500);
+                            } else {
+                                messageApi.error(data.message || 'Error al resetear');
+                            }
+                        } catch (err: any) {
+                            messageApi.error('Error: ' + (err.message || 'Desconocido'));
+                        }
+                    }}
+                    okText="Sí, resetear"
+                    cancelText="Cancelar"
+                    okButtonProps={{ danger: true }}
+                >
+                    <Button danger block>
+                        🔄 Resetear cache de chats
+                    </Button>
+                </Popconfirm>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                    Usa esto si ves nombres incorrectos o datos mezclados
+                </Text>
+            </Space>
+            <Divider />
+            <Typography.Title level={5}>Personalización</Typography.Title>
+            <Space direction="vertical" style={{ width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    {localStorage.getItem('panelLogo') && (
+                        <img 
+                            src={localStorage.getItem('panelLogo') || ''} 
+                            alt="Logo actual" 
+                            style={{ height: 40, width: 'auto', maxWidth: 100, objectFit: 'contain', borderRadius: 4, border: '1px solid #444' }} 
+                        />
+                    )}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                        {localStorage.getItem('panelLogo') ? 'Logo actual' : 'Sin logo configurado'}
+                    </Text>
+                </div>
+                <Upload
+                    accept="image/*"
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const base64 = e.target?.result as string;
+                            localStorage.setItem('panelLogo', base64);
+                            messageApi.success('Logo actualizado. Recarga la página para verlo en el header.');
+                        };
+                        reader.readAsDataURL(file);
+                        return false;
+                    }}
+                >
+                    <Button icon={<Upload />} block>
+                        📷 Subir logo
+                    </Button>
+                </Upload>
+                {localStorage.getItem('panelLogo') && (
+                    <Button 
+                        danger 
+                        block 
+                        onClick={() => {
+                            localStorage.removeItem('panelLogo');
+                            messageApi.info('Logo eliminado. Recarga la página para ver el cambio.');
+                        }}
+                    >
+                        🗑️ Eliminar logo
+                    </Button>
+                )}
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                    El logo aparecerá en el header del panel
+                </Text>
+            </Space>
         </Modal>
     );
 
@@ -980,18 +1453,22 @@ export const ChatInterface = ({
     }
 
     return (
-        <Layout style={{ height: '100%', background: '#0b141a' }}>
+        <Layout style={{ height: '100%', background: 'linear-gradient(180deg, #1a1410 0%, #0f0c08 100%)' }}>
             {contextHolder}
             {notificationContextHolder}
-            <Sider width={300} style={{ background: '#111b21', borderRight: '1px solid #222e35' }}>
-                <div style={{ padding: '10px' }}>
+            <Sider width={300} style={{ 
+                background: 'linear-gradient(180deg, #2a2218 0%, #1a1410 100%)', 
+                borderRight: '2px solid',
+                borderImage: 'linear-gradient(180deg, rgba(201, 162, 39, 0.3), transparent) 1'
+            }}>
+                <div style={{ padding: '12px' }}>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                         <Input
-                            prefix={<Search size={14} color="#8696a0" />}
+                            prefix={<Search size={14} color="#8b7b65" />}
                             suffix={searchQuery && (
                                 <X
                                     size={14}
-                                    color="#8696a0"
+                                    color="#8b7b65"
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => {
                                         setSearchQuery('');
@@ -1003,26 +1480,48 @@ export const ChatInterface = ({
                             placeholder={activeChat ? "Buscar mensajes en este chat..." : "Buscar mensajes..."}
                             value={searchQuery}
                             onChange={(e) => handleSearch(e.target.value)}
-                            style={{ borderRadius: '8px', background: '#202c33', color: '#d1d7db', border: 'none', flex: 1 }}
+                            style={{ 
+                                borderRadius: '8px', 
+                                background: 'linear-gradient(145deg, #1a1410 0%, #0f0c08 100%)', 
+                                color: '#f5e6c8', 
+                                border: '1px solid rgba(74, 61, 46, 0.6)', 
+                                flex: 1,
+                                fontFamily: "'Crimson Text', Georgia, serif"
+                            }}
                         />
                         <Button 
-                            icon={<Settings size={16} color="#8696a0" />} 
-                            style={{ background: '#202c33', border: 'none' }}
+                            icon={<Settings size={16} color="#c9a227" />} 
+                            style={{ 
+                                background: 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)', 
+                                border: '1px solid rgba(201, 162, 39, 0.3)' 
+                            }}
                             onClick={() => setShowSettingsModal(true)}
                         />
                     </div>
                 </div>
                 <div style={{ overflowY: 'auto', height: 'calc(100% - 60px)' }}>
                     {chats.length === 0 ? (
-                        <div style={{ padding: 40, textAlign: 'center', color: '#8696a0' }}>
+                        <div style={{ 
+                            padding: 40, 
+                            textAlign: 'center', 
+                            color: '#8b7b65',
+                            fontFamily: "'Crimson Text', Georgia, serif",
+                            fontStyle: 'italic'
+                        }}>
                             <p>No hay chats disponibles</p>
                             <p style={{ fontSize: '12px' }}>Envía o recibe un mensaje para ver tus conversaciones</p>
                         </div>
                     ) : (
                         <List
                             dataSource={chats}
-                            renderItem={chat => (
+                            renderItem={chat => {
+                                const isNotified = notifiedChats.has(chat.id) || 
+                                    Array.from(notifiedChats).some(nid => getChatKey(nid) === getChatKey(chat.id));
+                                const isActive = activeChat === chat.id;
+                                
+                                return (
                                 <List.Item
+                                    className={`chat-item-card ${isNotified ? 'chat-item-notified' : ''}`}
                                     onClick={() => {
                                         console.log('Chat seleccionado:', chat.id);
                                         setActiveChat(chat.id);
@@ -1030,36 +1529,66 @@ export const ChatInterface = ({
                                         setChats(prev => prev.map(c => 
                                             c.id === chat.id ? { ...c, unreadCount: 0 } : c
                                         ));
+                                        // Remover notificación al hacer click
+                                        setNotifiedChats(prev => {
+                                            const newSet = new Set(prev);
+                                            newSet.delete(chat.id);
+                                            return newSet;
+                                        });
+                                        // Limpiar respuesta pendiente al cambiar de chat
+                                        setReplyingTo(null);
                                     }}
                                     style={{
-                                        padding: '12px 15px',
-                                        borderBottom: '1px solid #222e35',
+                                        padding: '14px 16px',
+                                        borderBottom: '1px solid rgba(74, 61, 46, 0.4)',
                                         cursor: 'pointer',
-                                        background: activeChat === chat.id ? '#2a3942' : 'transparent',
-                                        transition: 'background 0.2s'
+                                        background: isActive 
+                                            ? 'linear-gradient(90deg, rgba(201, 162, 39, 0.15) 0%, rgba(47, 38, 29, 0.9) 100%)' 
+                                            : 'transparent',
+                                        borderLeft: isActive ? '3px solid #c9a227' : '3px solid transparent'
                                     }}
                                 >
                                     <List.Item.Meta
                                         avatar={
                                             <Avatar
-                                                shape="square"
+                                                shape="circle"
                                                 src={chat.profilePhotoUrl ? assetUrl(chat.profilePhotoUrl) : undefined}
-                                                style={{ backgroundColor: chat.isGroup ? '#25D366' : '#6a7175' }}
+                                                style={{ 
+                                                    backgroundColor: chat.isGroup ? '#4a7c59' : '#5a4d3d',
+                                                    border: '2px solid rgba(201, 162, 39, 0.3)',
+                                                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                                                    fontFamily: "'Playfair Display', Georgia, serif",
+                                                    fontWeight: 700
+                                                }}
                                             >
                                                 {chat.name.substring(0, 2).toUpperCase()}
                                             </Avatar>
                                         }
                                         title={
-                                            <div style={{ color: '#e9edef', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span>{chat.name}</span>
+                                            <div style={{ 
+                                                color: '#f5e6c8', 
+                                                display: 'flex', 
+                                                justifyContent: 'space-between', 
+                                                alignItems: 'center',
+                                                fontFamily: "'Crimson Text', Georgia, serif"
+                                            }}>
+                                                <span style={{ fontWeight: 600 }}>{chat.name}</span>
                                                 <Space size={4}>
                                                     {chat.unreadCount > 0 && (
                                                         <Badge
                                                             count={chat.unreadCount}
-                                                            style={{ backgroundColor: '#25D366' }}
+                                                            style={{ 
+                                                                background: 'linear-gradient(145deg, #cd7f32 0%, #b87333 100%)',
+                                                                boxShadow: '0 2px 8px rgba(205, 127, 50, 0.4)'
+                                                            }}
                                                         />
                                                     )}
-                                                    <span style={{ fontSize: '11px', color: '#8696a0' }}>
+                                                    <span style={{ 
+                                                        fontSize: '11px', 
+                                                        color: '#8b7b65',
+                                                        fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                        fontStyle: 'italic'
+                                                    }}>
                                                         {new Date(chat.lastMessageTime).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
                                                     </span>
                                                     <div onClick={(e) => e.stopPropagation()}>
@@ -1073,7 +1602,7 @@ export const ChatInterface = ({
                                                             <Button 
                                                                 type="text" 
                                                                 size="small" 
-                                                                icon={<Trash2 size={14} color="#8696a0" />} 
+                                                                icon={<Trash2 size={14} color="#8b7b65" />} 
                                                                 style={{ minWidth: 24, padding: 0 }}
                                                             />
                                                         </Popconfirm>
@@ -1082,35 +1611,144 @@ export const ChatInterface = ({
                                             </div>
                                         }
                                         description={
-                                            <Text ellipsis style={{ color: '#8696a0', fontSize: '13px' }}>
-                                                {chat.isGroup ? '👥 Grupo' : 'Chat privado'}
-                                            </Text>
+                                            <div style={{ 
+                                                color: '#8b7b65', 
+                                                fontSize: '13px', 
+                                                display: 'flex', 
+                                                alignItems: 'center', 
+                                                overflow: 'hidden',
+                                                fontFamily: "'Crimson Text', Georgia, serif",
+                                                fontStyle: 'italic'
+                                            }}>
+                                                {renderLastMessagePreview(chat)}
+                                            </div>
                                         }
                                     />
                                 </List.Item>
-                            )}
+                                );
+                            }}
                         />
                     )}
                 </div>
             </Sider>
-            <Content style={{ display: 'flex', flexDirection: 'column', background: '#0b141a' }}>
+            <Content style={{ display: 'flex', flexDirection: 'column', background: 'linear-gradient(180deg, #1a1410 0%, #0f0c08 100%)' }}>
                 {activeChat ? (
                     <>
                         {(() => {
                             const activeChatData = chats.find(c => c.id === activeChat);
                             const chatName = activeChatData?.name || activeChat.split('@')[0];
+                            const originalName = activeChatData?.originalName || null;
+                            const hasCustomName = Boolean(activeChatData?.customName);
+                            
                             return (
-                                <div style={{ padding: '10px 20px', background: '#202c33', display: 'flex', alignItems: 'center', borderBottom: '1px solid #222e35' }}>
-                                    <Avatar style={{ backgroundColor: activeChatData?.isGroup ? '#25D366' : '#6a7175' }}>
-                                        {chatName.substring(0, 2).toUpperCase()}
-                                    </Avatar>
-                                    <div style={{ marginLeft: 15 }}>
-                                        <div style={{ color: '#e9edef', fontWeight: 'bold' }}>{chatName}</div>
-                                        {presence && (
-                                            <div style={{ color: '#25D366', fontSize: '11px' }}>
-                                                {presence === 'composing' ? 'escribiendo...' : presence === 'recording' ? 'grabando audio...' : ''}
-                                            </div>
-                                        )}
+                                <div style={{ 
+                                    padding: '12px 20px', 
+                                    background: 'linear-gradient(180deg, #2f261d 0%, #2a2218 100%)', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'space-between',
+                                    borderBottom: '2px solid',
+                                    borderImage: 'linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.4), transparent) 1'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        <Avatar style={{ 
+                                            backgroundColor: activeChatData?.isGroup ? '#4a7c59' : '#5a4d3d',
+                                            border: '2px solid rgba(201, 162, 39, 0.4)',
+                                            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
+                                            fontFamily: "'Playfair Display', Georgia, serif",
+                                            fontWeight: 700
+                                        }}>
+                                            {chatName.substring(0, 2).toUpperCase()}
+                                        </Avatar>
+                                        <div style={{ marginLeft: 15 }}>
+                                            {editingContactName ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <Input
+                                                        value={newContactName}
+                                                        onChange={e => setNewContactName(e.target.value)}
+                                                        onPressEnter={saveContactName}
+                                                        placeholder="Nombre personalizado..."
+                                                        autoFocus
+                                                        style={{ 
+                                                            width: 200,
+                                                            background: '#1a1410',
+                                                            border: '1px solid rgba(201, 162, 39, 0.4)',
+                                                            color: '#f5e6c8'
+                                                        }}
+                                                    />
+                                                    <Button 
+                                                        type="text" 
+                                                        size="small"
+                                                        onClick={saveContactName}
+                                                        style={{ color: '#4a7c59' }}
+                                                    >
+                                                        ✓
+                                                    </Button>
+                                                    <Button 
+                                                        type="text" 
+                                                        size="small"
+                                                        onClick={() => setEditingContactName(false)}
+                                                        style={{ color: '#8b7b65' }}
+                                                    >
+                                                        ✕
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <div style={{ 
+                                                        color: '#f5e6c8', 
+                                                        fontWeight: 'bold',
+                                                        fontFamily: "'Playfair Display', Georgia, serif",
+                                                        fontSize: '15px',
+                                                        letterSpacing: '0.3px'
+                                                    }}>
+                                                        {chatName}
+                                                        {hasCustomName && (
+                                                            <span style={{ 
+                                                                marginLeft: 6, 
+                                                                fontSize: '10px', 
+                                                                color: '#c9a227',
+                                                                fontWeight: 'normal'
+                                                            }}>
+                                                                ✎
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <Tooltip title="Renombrar contacto (como agenda)">
+                                                        <Button
+                                                            type="text"
+                                                            size="small"
+                                                            icon={<Edit2 size={14} color="#8b7b65" />}
+                                                            onClick={() => {
+                                                                setNewContactName(activeChatData?.customName || '');
+                                                                setEditingContactName(true);
+                                                            }}
+                                                            style={{ padding: 4, minWidth: 24 }}
+                                                        />
+                                                    </Tooltip>
+                                                </div>
+                                            )}
+                                            {!editingContactName && originalName && hasCustomName && (
+                                                <div style={{ 
+                                                    color: '#8b7b65', 
+                                                    fontSize: '10px',
+                                                    fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                    fontStyle: 'italic'
+                                                }}>
+                                                    WhatsApp: {originalName}
+                                                </div>
+                                            )}
+                                            {presence && (
+                                                <div style={{ 
+                                                    color: '#c9a227', 
+                                                    fontSize: '11px',
+                                                    fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                    fontStyle: 'italic'
+                                                }}>
+                                                    {presence === 'composing' ? 'escribiendo...' : presence === 'recording' ? 'grabando audio...' : ''}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );
@@ -1122,109 +1760,238 @@ export const ChatInterface = ({
                                 flex: 1,
                                 padding: 20,
                                 overflowY: 'auto',
-                                background: 'repeating-linear-gradient(45deg, #0b141a 0, #0b141a 12px, #0a1319 12px, #0a1319 24px)',
+                                background: `
+                                    radial-gradient(ellipse at bottom right, rgba(201, 162, 39, 0.03) 0%, transparent 50%),
+                                    repeating-linear-gradient(45deg, 
+                                        rgba(26, 20, 16, 0.95) 0px, 
+                                        rgba(26, 20, 16, 0.95) 12px, 
+                                        rgba(15, 12, 8, 0.95) 12px, 
+                                        rgba(15, 12, 8, 0.95) 24px
+                                    )
+                                `,
                                 backgroundSize: 'auto'
                             }}
                         >
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {messages.map((m, i) => (
-                                    <div
+                                    <Dropdown
                                         key={m.id || i}
-                                        id={m.id ? `msg-${m.id}` : undefined}
-                                        style={{
-                                        alignSelf: m.fromMe ? 'flex-end' : 'flex-start',
-                                        background: m.fromMe ? (m.source === 'panel' ? '#005c4b' : '#1f3b2f') : '#202c33',
-                                        padding: '5px',
-                                        borderRadius: '8px',
-                                        color: '#e9edef',
-                                        maxWidth: '70%',
-                                        boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)',
-                                        position: 'relative',
-                                        outline: highlightMsgId && m.id === highlightMsgId ? '2px solid #25D366' : undefined
-                                    }}
+                                        menu={{
+                                            items: [
+                                                { 
+                                                    key: 'reply', 
+                                                    label: 'Responder',
+                                                    icon: <span style={{ marginRight: 8 }}>↩️</span>,
+                                                    onClick: () => {
+                                                        console.log('[Reply] Mensaje seleccionado:', { id: m.id, text: m.text?.substring(0, 30), senderName: m.senderName, fromMe: m.fromMe });
+                                                        setReplyingTo(m);
+                                                    }
+                                                },
+                                                { 
+                                                    key: 'copy', 
+                                                    label: 'Copiar texto',
+                                                    icon: <span style={{ marginRight: 8 }}>📋</span>,
+                                                    onClick: () => {
+                                                        navigator.clipboard.writeText(m.text || '');
+                                                        messageApi.success('Texto copiado');
+                                                    },
+                                                    disabled: !m.text
+                                                }
+                                            ]
+                                        }}
+                                        trigger={['contextMenu']}
                                     >
-                                        {m.location && Number.isFinite(m.location.latitude) && Number.isFinite(m.location.longitude) && (
-                                            <div
-                                                style={{
-                                                    background: 'rgba(0,0,0,0.2)',
-                                                    padding: '10px 12px',
-                                                    borderRadius: 6,
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    gap: 6
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '13px', fontWeight: 600 }}>📍 Ubicación</div>
-                                                {(m.location.name || m.location.address) && (
-                                                    <div style={{ fontSize: '12px', color: '#d1d7db' }}>
-                                                        {m.location.name && <div>{m.location.name}</div>}
-                                                        {m.location.address && <div style={{ color: '#8696a0' }}>{m.location.address}</div>}
-                                                    </div>
-                                                )}
-                                                <div style={{ fontSize: '11px', color: '#8696a0' }}>
-                                                    {m.location.latitude.toFixed(5)}, {m.location.longitude.toFixed(5)}
+                                        <div
+                                            id={m.id ? `msg-${m.id}` : undefined}
+                                            style={{
+                                                alignSelf: m.fromMe ? 'flex-end' : 'flex-start',
+                                                background: m.fromMe 
+                                                    ? (m.source === 'panel' 
+                                                        ? 'linear-gradient(145deg, #4a7c59 0%, #2d4a35 100%)' 
+                                                        : 'linear-gradient(145deg, #3d5a45 0%, #2a3d30 100%)') 
+                                                    : 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                                padding: '8px',
+                                                borderRadius: '10px',
+                                                color: '#f5e6c8',
+                                                maxWidth: '70%',
+                                                boxShadow: '0 3px 10px rgba(0,0,0,0.3), inset 0 1px 0 rgba(245, 230, 200, 0.05)',
+                                                position: 'relative',
+                                                border: m.fromMe 
+                                                    ? '1px solid rgba(74, 124, 89, 0.4)' 
+                                                    : '1px solid rgba(201, 162, 39, 0.2)',
+                                                outline: highlightMsgId && m.id === highlightMsgId ? '2px solid #c9a227' : undefined,
+                                                cursor: 'context-menu',
+                                                fontFamily: "'Crimson Text', Georgia, serif"
+                                            }}
+                                        >
+                                            {/* Nombre del remitente para mensajes recibidos - estilo retro */}
+                                            {!m.fromMe && m.senderName && (
+                                                <div style={{ 
+                                                    fontSize: '12px', 
+                                                    fontWeight: 700, 
+                                                    color: '#c9a227',
+                                                    padding: '2px 7px 6px 7px',
+                                                    fontFamily: "'Playfair Display', Georgia, serif",
+                                                    letterSpacing: '0.3px',
+                                                    textShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                                                }}>
+                                                    {m.senderName}
                                                 </div>
-                                                <div>
-                                                    <a
-                                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${m.location.latitude},${m.location.longitude}`)}`}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        style={{ color: '#25D366', fontSize: '12px' }}
-                                                    >
-                                                        Abrir en Google Maps
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {m.media && (
-                                            <div style={{ marginBottom: 5, borderRadius: 4, overflow: 'hidden' }}>
-                                                {m.media.mimeType.startsWith('image/') ? (
-                                                    <img
-                                                        src={assetUrl(m.media.url)}
-                                                        alt={m.media.fileName}
-                                                        style={{ maxWidth: '100%', maxHeight: 300, display: 'block', cursor: 'pointer' }}
-                                                        onClick={() => window.open(assetUrl(m.media?.url || ''))}
-                                                    />
-                                                ) : m.media.mimeType.startsWith('video/') ? (
-                                                    <video controls style={{ maxWidth: '100%', maxHeight: 300 }}>
-                                                        <source src={assetUrl(m.media.url)} type={m.media.mimeType} />
-                                                    </video>
-                                                ) : m.media.mimeType.startsWith('audio/') ? (
-                                                    <audio controls style={{ maxWidth: 250 }}>
-                                                        <source src={assetUrl(m.media.url)} type={m.media.mimeType} />
-                                                    </audio>
-                                                ) : (
-                                                    <div
-                                                        style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
-                                                        onClick={() => window.open(assetUrl(m.media?.url || ''))}
-                                                    >
-                                                        <Paperclip size={20} />
-                                                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                            <div style={{ fontSize: '13px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{m.media.fileName}</div>
-                                                            <div style={{ fontSize: '11px', color: '#8696a0' }}>{(m.media.size / 1024).toFixed(1)} KB</div>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        {m.text && <div style={{ padding: '3px 7px 0 7px' }}>{m.text}</div>}
-                                        <div style={{ fontSize: '10px', color: '#8696a0', textAlign: 'right', marginTop: 4, padding: '0 5px 2px 7px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                                            {(m.source === 'panel' || m.source === 'phone' || m.source === 'whatsapp') && (
-                                                <Tooltip title={`Enviado desde ${m.source === 'panel' ? 'el Panel' : 'el Dispositivo'}`}>
-                                                    <span>
-                                                        <Badge status="processing" text={m.source === 'panel' ? 'Panel' : 'Dispositivo'} style={{ fontSize: '9px', color: '#53bdeb' }} />
-                                                    </span>
-                                                </Tooltip>
                                             )}
-                                            {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            {m.fromMe && <CheckCheck size={12} color="#53bdeb" />}
+                                            {m.location && Number.isFinite(m.location.latitude) && Number.isFinite(m.location.longitude) && (
+                                                <div
+                                                    style={{
+                                                        background: 'rgba(0,0,0,0.2)',
+                                                        padding: '10px 12px',
+                                                        borderRadius: 6,
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        gap: 6
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '13px', fontWeight: 600 }}>📍 Ubicación</div>
+                                                    {(m.location.name || m.location.address) && (
+                                                        <div style={{ fontSize: '12px', color: '#d1d7db' }}>
+                                                            {m.location.name && <div>{m.location.name}</div>}
+                                                            {m.location.address && <div style={{ color: '#8696a0' }}>{m.location.address}</div>}
+                                                        </div>
+                                                    )}
+                                                    <div style={{ fontSize: '11px', color: '#8696a0' }}>
+                                                        {m.location.latitude.toFixed(5)}, {m.location.longitude.toFixed(5)}
+                                                    </div>
+                                                    <div>
+                                                        <a
+                                                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${m.location.latitude},${m.location.longitude}`)}`}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            style={{ color: '#25D366', fontSize: '12px' }}
+                                                        >
+                                                            Abrir en Google Maps
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {m.media && (
+                                                <div style={{ marginBottom: 5, borderRadius: 4, overflow: 'hidden' }}>
+                                                    {m.media.mimeType.startsWith('image/') ? (
+                                                        <img
+                                                            src={assetUrl(m.media.url)}
+                                                            alt={m.media.fileName}
+                                                            style={{ maxWidth: '100%', maxHeight: 300, display: 'block', cursor: 'pointer' }}
+                                                            onClick={() => window.open(assetUrl(m.media?.url || ''))}
+                                                        />
+                                                    ) : m.media.mimeType.startsWith('video/') ? (
+                                                        <video controls style={{ maxWidth: '100%', maxHeight: 300 }}>
+                                                            <source src={assetUrl(m.media.url)} type={m.media.mimeType} />
+                                                        </video>
+                                                    ) : m.media.mimeType.startsWith('audio/') ? (
+                                                        <audio controls style={{ maxWidth: 250 }}>
+                                                            <source src={assetUrl(m.media.url)} type={m.media.mimeType} />
+                                                        </audio>
+                                                    ) : (
+                                                        <div
+                                                            style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
+                                                            onClick={() => window.open(assetUrl(m.media?.url || ''))}
+                                                        >
+                                                            <Paperclip size={20} />
+                                                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                                <div style={{ fontSize: '13px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{m.media.fileName}</div>
+                                                                <div style={{ fontSize: '11px', color: '#8696a0' }}>{(m.media.size / 1024).toFixed(1)} KB</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {m.text && <div style={{ padding: '3px 7px 0 7px', lineHeight: 1.5 }}>{m.text}</div>}
+                                            <div style={{ 
+                                                fontSize: '10px', 
+                                                color: '#8b7b65', 
+                                                textAlign: 'right', 
+                                                marginTop: 6, 
+                                                padding: '0 5px 2px 7px', 
+                                                display: 'flex', 
+                                                alignItems: 'center', 
+                                                justifyContent: 'flex-end', 
+                                                gap: 6,
+                                                fontFamily: "'Source Serif Pro', Georgia, serif",
+                                                fontStyle: 'italic'
+                                            }}>
+                                                {(m.source === 'panel' || m.source === 'phone' || m.source === 'whatsapp') && (
+                                                    <Tooltip title={`Enviado desde ${m.source === 'panel' ? 'el Panel' : 'el Dispositivo'}`}>
+                                                        <span style={{ 
+                                                            background: 'rgba(201, 162, 39, 0.15)', 
+                                                            padding: '2px 6px', 
+                                                            borderRadius: '4px',
+                                                            color: '#c9a227',
+                                                            fontSize: '9px'
+                                                        }}>
+                                                            {m.source === 'panel' ? '◈ Panel' : '◈ Dispositivo'}
+                                                        </span>
+                                                    </Tooltip>
+                                                )}
+                                                {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                {m.fromMe && <CheckCheck size={12} color="#c9a227" />}
+                                            </div>
                                         </div>
-                                    </div>
+                                    </Dropdown>
                                 ))}
                             </div>
                         </div>
 
-                        <div style={{ padding: '10px', background: '#202c33', display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {/* Indicador de respuesta - estilo retro */}
+                        {replyingTo && (
+                            <div style={{ 
+                                background: 'linear-gradient(90deg, rgba(201, 162, 39, 0.1) 0%, rgba(47, 38, 29, 0.95) 100%)', 
+                                padding: '10px 14px',
+                                borderLeft: '4px solid #c9a227',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                borderTop: '1px solid rgba(201, 162, 39, 0.2)'
+                            }}>
+                                <div style={{ flex: 1, overflow: 'hidden' }}>
+                                    <div style={{ 
+                                        color: '#c9a227', 
+                                        fontSize: 12, 
+                                        fontWeight: 700,
+                                        fontFamily: "'Playfair Display', Georgia, serif",
+                                        letterSpacing: '0.3px'
+                                    }}>
+                                        ↩ Respondiendo a {replyingTo.fromMe ? 'ti mismo' : (replyingTo.senderName || 'Contacto')}
+                                    </div>
+                                    <div style={{ 
+                                        color: '#8b7b65', 
+                                        fontSize: 11, 
+                                        overflow: 'hidden', 
+                                        textOverflow: 'ellipsis', 
+                                        whiteSpace: 'nowrap',
+                                        fontFamily: "'Crimson Text', Georgia, serif",
+                                        fontStyle: 'italic',
+                                        marginTop: 2
+                                    }}>
+                                        {replyingTo.text?.substring(0, 60) || (replyingTo.media ? '📎 Multimedia' : '...')}
+                                        {replyingTo.text && replyingTo.text.length > 60 ? '...' : ''}
+                                    </div>
+                                </div>
+                                <Button 
+                                    type="text" 
+                                    size="small"
+                                    icon={<X size={16} color="#8b7b65" />} 
+                                    onClick={cancelReply}
+                                    style={{ marginLeft: 8 }}
+                                />
+                            </div>
+                        )}
+
+                        <div style={{ 
+                            padding: '12px 14px', 
+                            background: 'linear-gradient(180deg, #2f261d 0%, #2a2218 100%)', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 12,
+                            borderTop: '2px solid',
+                            borderImage: 'linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.3), transparent) 1'
+                        }}>
                             {isRecording ? (
                                 <>
                                     <Tooltip title="Cancelar grabación">
@@ -1239,19 +2006,26 @@ export const ChatInterface = ({
                                         flex: 1,
                                         display: 'flex',
                                         alignItems: 'center',
-                                        gap: 10,
-                                        background: '#2a3942',
-                                        padding: '10px 15px',
-                                        borderRadius: '8px'
+                                        gap: 12,
+                                        background: 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                        padding: '12px 16px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(201, 162, 39, 0.2)'
                                     }}>
                                         <div style={{
                                             width: 12,
                                             height: 12,
                                             borderRadius: '50%',
-                                            background: '#ff4d4f',
-                                            animation: 'pulse 1.5s ease-in-out infinite'
+                                            background: 'linear-gradient(145deg, #cd7f32 0%, #b87333 100%)',
+                                            animation: 'pulse 1.5s ease-in-out infinite',
+                                            boxShadow: '0 0 10px rgba(205, 127, 50, 0.5)'
                                         }} />
-                                        <span style={{ color: '#e9edef', fontSize: '14px' }}>
+                                        <span style={{ 
+                                            color: '#f5e6c8', 
+                                            fontSize: '14px',
+                                            fontFamily: "'Source Serif Pro', Georgia, serif",
+                                            fontStyle: 'italic'
+                                        }}>
                                             Grabando... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                                         </span>
                                     </div>
@@ -1259,7 +2033,7 @@ export const ChatInterface = ({
                                         <Button
                                             type="text"
                                             onClick={stopRecording}
-                                            icon={<Send size={20} color="#25D366" />}
+                                            icon={<Send size={20} color="#c9a227" />}
                                         />
                                     </Tooltip>
                                 </>
@@ -1272,13 +2046,131 @@ export const ChatInterface = ({
                                         style={{ display: 'none' }}
                                         onChange={handleFileSelect}
                                     />
+                                    {/* Selector de Emojis */}
+                                    <Popover
+                                        content={
+                                            <div style={{ width: 320, maxHeight: 350 }}>
+                                                {/* Categorías */}
+                                                <div style={{ 
+                                                    display: 'flex', 
+                                                    gap: 4, 
+                                                    marginBottom: 8, 
+                                                    flexWrap: 'wrap',
+                                                    borderBottom: '1px solid rgba(201, 162, 39, 0.2)',
+                                                    paddingBottom: 8
+                                                }}>
+                                                    {Object.keys(EMOJI_CATEGORIES).map(cat => (
+                                                        <Button
+                                                            key={cat}
+                                                            size="small"
+                                                            type={activeEmojiCategory === cat ? 'primary' : 'text'}
+                                                            onClick={() => setActiveEmojiCategory(cat)}
+                                                            style={{ 
+                                                                fontSize: 11,
+                                                                padding: '2px 8px',
+                                                                background: activeEmojiCategory === cat 
+                                                                    ? 'linear-gradient(145deg, #c9a227 0%, #8b7015 100%)' 
+                                                                    : 'transparent',
+                                                                color: activeEmojiCategory === cat ? '#1a1410' : '#c9a227',
+                                                                border: activeEmojiCategory === cat 
+                                                                    ? 'none' 
+                                                                    : '1px solid rgba(201, 162, 39, 0.3)'
+                                                            }}
+                                                        >
+                                                            {cat}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                                {/* Grid de emojis */}
+                                                <div style={{ 
+                                                    display: 'grid', 
+                                                    gridTemplateColumns: 'repeat(8, 1fr)', 
+                                                    gap: 4,
+                                                    maxHeight: 250,
+                                                    overflowY: 'auto'
+                                                }}>
+                                                    {EMOJI_CATEGORIES[activeEmojiCategory as keyof typeof EMOJI_CATEGORIES]?.map((emoji, idx) => (
+                                                        <Button
+                                                            key={idx}
+                                                            type="text"
+                                                            onClick={() => {
+                                                                insertEmoji(emoji);
+                                                                // No cerrar para permitir seleccionar múltiples
+                                                            }}
+                                                            style={{ 
+                                                                fontSize: 22, 
+                                                                padding: 4,
+                                                                minWidth: 36,
+                                                                height: 36,
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                borderRadius: 6,
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseEnter={e => {
+                                                                e.currentTarget.style.background = 'rgba(201, 162, 39, 0.2)';
+                                                                e.currentTarget.style.transform = 'scale(1.2)';
+                                                            }}
+                                                            onMouseLeave={e => {
+                                                                e.currentTarget.style.background = 'transparent';
+                                                                e.currentTarget.style.transform = 'scale(1)';
+                                                            }}
+                                                        >
+                                                            {emoji}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        }
+                                        title={
+                                            <span style={{ 
+                                                color: '#c9a227', 
+                                                fontFamily: "'Playfair Display', Georgia, serif" 
+                                            }}>
+                                                Emojis
+                                            </span>
+                                        }
+                                        trigger="click"
+                                        open={showEmojiPicker}
+                                        onOpenChange={setShowEmojiPicker}
+                                        placement="topLeft"
+                                        overlayStyle={{ 
+                                            background: 'linear-gradient(145deg, #2f261d 0%, #1a1410 100%)',
+                                            borderRadius: 10,
+                                            border: '1px solid rgba(201, 162, 39, 0.3)'
+                                        }}
+                                        overlayInnerStyle={{
+                                            background: 'transparent'
+                                        }}
+                                    >
+                                        <Tooltip title="Emojis">
+                                            <Button
+                                                type="text"
+                                                icon={<Smile size={20} color="#c9a227" />}
+                                                style={{
+                                                    background: showEmojiPicker 
+                                                        ? 'linear-gradient(145deg, #4a3d2e 0%, #3d3225 100%)' 
+                                                        : 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                                    border: '1px solid rgba(201, 162, 39, 0.3)',
+                                                    borderRadius: '8px'
+                                                }}
+                                            />
+                                        </Tooltip>
+                                    </Popover>
+                                    
                                     <Tooltip title="Adjuntar archivo">
                                         <Button
                                             type="text"
-                                            icon={<Paperclip size={20} color="#8696a0" />}
+                                            icon={<Paperclip size={20} color="#8b7b65" />}
                                             onClick={() => fileInputRef.current?.click()}
                                             loading={uploadingFile}
                                             disabled={uploadingFile}
+                                            style={{
+                                                background: 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                                border: '1px solid rgba(201, 162, 39, 0.2)',
+                                                borderRadius: '8px'
+                                            }}
                                         />
                                     </Tooltip>
                                     <Input
@@ -1296,6 +2188,7 @@ export const ChatInterface = ({
                                                     if (template) {
                                                         e.preventDefault();
                                                         setInputText(template.content);
+                                                        void apiFetch(`/api/templates/${template.id}/use`, { method: 'POST' }).catch(() => {});
                                                         return;
                                                     }
                                                 }
@@ -1313,17 +2206,40 @@ export const ChatInterface = ({
                                             sendMessage();
                                         }}
                                         placeholder="Escribe un mensaje o usa /atajo + espacio"
-                                        style={{ borderRadius: '8px', background: '#2a3942', color: '#d1d7db', border: 'none', height: '40px' }}
+                                        style={{ 
+                                            borderRadius: '8px', 
+                                            background: 'linear-gradient(145deg, #1a1410 0%, #0f0c08 100%)', 
+                                            color: '#f5e6c8', 
+                                            border: '1px solid rgba(74, 61, 46, 0.6)', 
+                                            height: '42px',
+                                            fontFamily: "'Crimson Text', Georgia, serif",
+                                            fontSize: '14px'
+                                        }}
                                         disabled={uploadingFile}
                                     />
                                     {inputText ? (
-                                        <Button type="text" onClick={sendMessage} loading={loading} icon={<Send size={20} color="#25D366" />} />
+                                        <Button 
+                                            type="text" 
+                                            onClick={sendMessage} 
+                                            loading={loading} 
+                                            icon={<Send size={20} color="#c9a227" />}
+                                            style={{
+                                                background: 'linear-gradient(145deg, #4a7c59 0%, #2d4a35 100%)',
+                                                border: '1px solid rgba(74, 124, 89, 0.4)',
+                                                borderRadius: '8px'
+                                            }}
+                                        />
                                     ) : (
                                         <Tooltip title="Mantén presionado para grabar">
                                             <Button
                                                 type="text"
-                                                icon={<Mic size={20} color={uploadingFile ? "#8696a0" : "#25D366"} />}
+                                                icon={<Mic size={20} color={uploadingFile ? "#8b7b65" : "#c9a227"} />}
                                                 onClick={startRecording}
+                                                style={{
+                                                    background: 'linear-gradient(145deg, #3d3225 0%, #2a2218 100%)',
+                                                    border: '1px solid rgba(201, 162, 39, 0.2)',
+                                                    borderRadius: '8px'
+                                                }}
                                                 disabled={uploadingFile}
                                             />
                                         </Tooltip>

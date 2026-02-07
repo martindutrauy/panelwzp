@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { verifyAuthToken } from './authToken';
 import { appendAuditEvent } from './auditLog';
-import { getOwnerTwoFactorSecret, getOwnerUser, loadOwnerState } from './ownerStore';
-import { findUserById, getUserPublic, getUserTwoFactorSecret } from './userStore';
+import { getOwnerUser, loadOwnerState } from './ownerStore';
+import { findUserById, getUserPublic } from './userStore';
 import { findSession, revokeSession, touchSession } from './sessionStore';
 import { getSessionIdleTtlMs } from './ownerStore';
 import type { AuthUser, Role } from './types';
@@ -55,19 +55,6 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
         if (verified.tv !== pub.tokenVersion) return res.status(401).json({ error: 'Sesión inválida' });
         if (pub.disabled) return res.status(403).json({ error: 'Usuario desactivado' });
         user = pub;
-    }
-
-    const needs2fa = user.role === 'OWNER' || user.role === 'ADMIN';
-    if (needs2fa) {
-        const secret = user.role === 'OWNER' ? getOwnerTwoFactorSecret() : (() => {
-            const st = verified.r !== 'OWNER' ? findUserById(verified.sub) : null;
-            return st ? getUserTwoFactorSecret(st) : null;
-        })();
-        const ok = Boolean(secret);
-        if (!ok) {
-            const allowed = req.path.startsWith('/security/2fa/') || req.path === '/auth/me';
-            if (!allowed) return res.status(403).json({ error: 'Se requiere configurar 2FA para continuar', code: '2FA_SETUP_REQUIRED' });
-        }
     }
 
     (req as AuthedRequest).auth = { user, sessionId: verified.sid };

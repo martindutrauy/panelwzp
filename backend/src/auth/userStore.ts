@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { dbPath } from '../config/paths';
-import { decrypt, encrypt } from '../utils/crypto';
 import { atomicWriteJson, safeReadJson } from './storage';
 import type { AuthUser, Role, StoredUser, StoredUsersFile } from './types';
 
@@ -18,7 +17,6 @@ const sanitizeUser = (u: StoredUser): StoredUser => ({
     disabled: Boolean(u.disabled),
     passwordHash: String(u.passwordHash || ''),
     tokenVersion: Number.isFinite(u.tokenVersion) ? Number(u.tokenVersion) : 0,
-    twoFactorSecretEnc: typeof u.twoFactorSecretEnc === 'string' ? u.twoFactorSecretEnc : null,
     createdAt: typeof u.createdAt === 'number' ? u.createdAt : Date.now(),
     updatedAt: typeof u.updatedAt === 'number' ? u.updatedAt : Date.now(),
     passwordUpdatedAt: typeof u.passwordUpdatedAt === 'number' ? u.passwordUpdatedAt : Date.now()
@@ -43,9 +41,7 @@ export const listUsers = (): AuthUser[] => {
         email: u.email,
         role: u.role,
         disabled: u.disabled,
-        tokenVersion: u.tokenVersion,
-        twoFactorRequired: u.role === 'ADMIN',
-        twoFactorEnabled: Boolean(u.twoFactorSecretEnc)
+        tokenVersion: u.tokenVersion
     }));
 };
 
@@ -71,9 +67,7 @@ export const getUserPublic = (u: StoredUser): AuthUser => ({
     email: u.email,
     role: u.role,
     disabled: u.disabled,
-    tokenVersion: u.tokenVersion,
-    twoFactorRequired: u.role === 'ADMIN',
-    twoFactorEnabled: Boolean(u.twoFactorSecretEnc)
+    tokenVersion: u.tokenVersion
 });
 
 export const createUser = (input: { username: string; email?: string | null; role: Role; passwordHash: string }) => {
@@ -98,7 +92,6 @@ export const createUser = (input: { username: string; email?: string | null; rol
         disabled: false,
         passwordHash: String(input.passwordHash || ''),
         tokenVersion: 0,
-        twoFactorSecretEnc: null,
         createdAt: now,
         updatedAt: now,
         passwordUpdatedAt: now
@@ -140,18 +133,12 @@ export const setUserPasswordHash = (userId: string, passwordHash: string) => {
     return nextUsers.find((u) => u.id === id) || null;
 };
 
-export const getUserTwoFactorSecret = (u: StoredUser) => {
-    if (!u.twoFactorSecretEnc) return null;
-    const v = decrypt(u.twoFactorSecretEnc);
-    return String(v || '').trim() || null;
-};
-
-export const setUserTwoFactorSecret = (userId: string, secretBase32: string | null) => {
+export const deleteUser = (userId: string) => {
     const { users } = loadUsersFile();
     const id = String(userId || '').trim();
-    const now = Date.now();
-    const enc = secretBase32 ? encrypt(String(secretBase32 || '').trim()) : null;
-    const nextUsers = users.map((u) => (u.id === id ? { ...u, twoFactorSecretEnc: enc, updatedAt: now, tokenVersion: u.tokenVersion + 1 } : u));
+    const existing = users.find((u) => u.id === id) || null;
+    if (!existing) return null;
+    const nextUsers = users.filter((u) => u.id !== id);
     saveUsersFile({ v: 1, users: nextUsers });
-    return nextUsers.find((u) => u.id === id) || null;
+    return existing;
 };

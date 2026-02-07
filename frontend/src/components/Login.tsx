@@ -6,7 +6,6 @@ import { setAuthToken, setAuthUser } from '../lib/auth';
 export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
     const [username, setUsername] = useState('admin');
     const [password, setPassword] = useState('');
-    const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [messageApi, contextHolder] = message.useMessage();
 
@@ -16,7 +15,7 @@ export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
             const res = await apiFetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, otp: otp.trim() || undefined })
+                body: JSON.stringify({ username, password })
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(String(data?.error || 'Error al iniciar sesión'));
@@ -58,13 +57,6 @@ export const Login = ({ onLoggedIn }: { onLoggedIn: () => void }) => {
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="Contraseña"
                         autoComplete="current-password"
-                        onPressEnter={submit}
-                    />
-                    <Input
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value)}
-                        placeholder="Código 2FA (si aplica)"
-                        autoComplete="one-time-code"
                         onPressEnter={submit}
                     />
                     <Button type="primary" loading={loading} onClick={submit}>

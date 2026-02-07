@@ -18,10 +18,10 @@ Este documento describe el proceso completo para desplegar este proyecto en Rail
 
 ### Backend (service del backend)
 
+- `DATABASE_URL`: **obligatoria**. Cadena de conexión a MySQL (la crea Railway si agregás un servicio MySQL, o la podés setear manualmente).
 - `OWNER_USERNAME`: usuario del propietario (ej: `admin`)
 - `OWNER_PASSWORD`: contraseña del propietario (fuerte). No se cambia desde la UI
 - `OWNER_EMAIL` (opcional): email del propietario (para referencia)
-- `OWNER_TOTP_SECRET` (opcional): secreto TOTP del propietario (si se gestiona por env)
 - `APP_AUTH_SECRET`: secreto largo (32+ chars)
 - `APP_TOKEN_TTL_MS` (opcional): expiración del token (default 8h)
 - `APP_SESSION_IDLE_TTL_MS` (opcional): expiración por inactividad (default 24h)
@@ -38,8 +38,8 @@ Persistencia:
   - `devices.json` (sucursales/dispositivos)
   - `storage/` (archivos)
   - `auth/<deviceId>/` (sesiones Baileys)
-  - `messages/` (base propia del panel: backup de mensajes por sucursal)
-  - `security/owner.json` (estado OWNER: 2FA/emergency lock/token version)
+  - `messages/` (backup local legacy; la **fuente de verdad** de chats/mensajes es MySQL cuando `DATABASE_URL` está seteada)
+  - `security/owner.json` (estado OWNER: emergency lock/token version)
   - `security/users.json` (usuarios ADMIN/USER)
   - `security/sessions.json` (sesiones del panel)
   - `security/audit.log` (logs inmutables de seguridad)
@@ -65,8 +65,9 @@ Nota: en Vite las variables `VITE_*` se “pegan” al compilar. Si las cambiás
    - **Root Directory / Service Path**: `backend`
 3. En **Settings** configurar comandos:
    - **Build Command**: `npm ci && npm run build`
-   - **Start Command**: `npm run start:prod`
+   - **Start Command**: `npm run prisma:migrate:deploy && npm run start:prod`
 4. En **Variables** del backend, agregar:
+   - `DATABASE_URL`
    - `OWNER_USERNAME`
    - `OWNER_PASSWORD`
    - `APP_AUTH_SECRET`
@@ -85,6 +86,15 @@ Notas:
 - Si existe volumen, Railway inyecta `RAILWAY_VOLUME_MOUNT_PATH` y el backend lo usa automáticamente.
 - En la práctica, la sesión debe permanecer `CONNECTED` después de redeploy.
 
+### 3.1) MySQL (recomendado/obligatorio para chats)
+
+Objetivo: que **los chats y mensajes no se pierdan** y no haya inconsistencias.
+
+1. En Railway, agregar un servicio **MySQL** al proyecto.
+2. Copiar la cadena de conexión (connection string) y setearla como variable del **backend**:
+   - `DATABASE_URL=...`
+3. Redeploy del backend. En el arranque se ejecuta `prisma migrate deploy` automáticamente.
+
 ### 4) Frontend: crear service apuntando a `frontend/`
 
 1. Crear un nuevo service desde el mismo repo.
@@ -95,7 +105,7 @@ Notas:
    - `VITE_SOCKET_URL=https://TU_BACKEND.up.railway.app`
 4. En **Settings** configurar comandos:
    - **Build Command**: `npm ci --include=dev && npm run build`
-   - **Start Command**: `npm run preview -- --host 0.0.0.0 --port $PORT`
+   - **Start Command**: `npm start`
 5. Hacer **Redeploy** del frontend.
 6. En **Settings → Networking** del frontend:
    - **Generate Domain**
@@ -105,7 +115,6 @@ Notas:
 
 1. Abrir la URL del frontend.
 2. Loguear con `OWNER_USERNAME`/`OWNER_PASSWORD`.
-3. Ir a **🔒 Seguridad** y configurar 2FA (obligatorio para OWNER y ADMINS).
 3. Crear una sucursal/dispositivo (o usar uno existente).
 4. Iniciar dispositivo → ver QR → escanear desde WhatsApp:
    - WhatsApp → Dispositivos vinculados → Vincular un dispositivo → escanear.

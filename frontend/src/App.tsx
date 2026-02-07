@@ -4,10 +4,12 @@ import { MessageSquare } from 'lucide-react';
 import { WhatsAppPanelModal } from './components/WhatsAppPanelModal';
 import { Login } from './components/Login';
 import { clearAuthToken, getAuthToken } from './lib/auth';
+import { apiFetch } from './lib/runtime';
 import { unlockNotificationAudio } from './services/notificationSound.service';
 import { initTts } from './services/tts.service';
 import { GlobalSecurityModal } from './components/GlobalSecurityModal';
 import { useSocket } from './hooks/useSocket';
+import { VisualNotificationsOverlay, addVisualNotification } from './components/VisualNotifications';
 
 function App() {
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -69,6 +71,67 @@ function App() {
         };
     }, [socket]);
 
+    // Escuchar mensajes nuevos para notificaciones visuales
+    useEffect(() => {
+        if (!socket) return;
+        
+        // Almacenar nombres de dispositivos
+        const deviceNames = new Map<string, string>();
+        
+        // Cargar nombres de dispositivos
+        const loadDeviceNames = async () => {
+            try {
+                const res = await apiFetch('/api/devices');
+                const devices = await res.json();
+                if (Array.isArray(devices)) {
+                    devices.forEach((d: any) => {
+                        deviceNames.set(d.id, d.name || d.id);
+                    });
+                }
+                console.log('[VisualNotifications] Dispositivos cargados:', deviceNames.size);
+            } catch (e) {
+                console.error('[VisualNotifications] Error cargando dispositivos:', e);
+            }
+        };
+        loadDeviceNames();
+        
+        const handler = (data: any) => {
+            console.log('[VisualNotifications] Mensaje recibido:', data);
+            
+            const deviceId = String(data?.deviceId || '');
+            const chatId = String(data?.chatId || '');
+            const msg = data?.msg || {};
+            
+            // No mostrar mensajes propios
+            if (msg.fromMe) {
+                console.log('[VisualNotifications] Ignorando mensaje propio');
+                return;
+            }
+            
+            const msgId = String(msg.id || `${Date.now()}-${Math.random()}`);
+            const senderName = msg.senderName || chatId.split('@')[0] || 'Desconocido';
+            const branchName = deviceNames.get(deviceId) || deviceId;
+            
+            console.log('[VisualNotifications] Agregando notificación:', { msgId, senderName, branchName });
+            
+            addVisualNotification({
+                id: msgId,
+                branchId: deviceId,
+                branchName,
+                chatId,
+                senderName,
+                messageText: msg.text || null,
+                messageType: msg.type || 'text',
+                timestamp: msg.timestamp || Date.now()
+            });
+        };
+        
+        socket.on('message:new', handler);
+        return () => {
+            socket.off('message:new', handler);
+        };
+    }, [socket]);
+
     if (!authed) {
         return <Login onLoggedIn={() => setAuthed(true)} />;
     }
@@ -84,6 +147,7 @@ function App() {
             }}
         >
             {notificationContextHolder}
+            <VisualNotificationsOverlay />
             <div style={{
                 height: '100vh',
                 display: 'flex',

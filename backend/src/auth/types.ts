@@ -7,8 +7,6 @@ export type AuthUser = {
     role: Role;
     disabled: boolean;
     tokenVersion: number;
-    twoFactorRequired: boolean;
-    twoFactorEnabled: boolean;
 };
 
 export type StoredUser = {
@@ -20,7 +18,6 @@ export type StoredUser = {
     disabled: boolean;
     passwordHash: string;
     tokenVersion: number;
-    twoFactorSecretEnc: string | null;
     createdAt: number;
     updatedAt: number;
     passwordUpdatedAt: number;
@@ -34,8 +31,6 @@ export type StoredUsersFile = {
 export type OwnerState = {
     v: 1;
     tokenVersion: number;
-    twoFactorSecretEnc: string | null;
-    twoFactorRequired: boolean;
     emergencyLock: boolean;
     updatedAt: number;
 };

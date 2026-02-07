@@ -21,7 +21,6 @@ El acceso al panel está protegido por un modelo **OWNER + ADMINS** (control tot
   - `OWNER_USERNAME` (ej: `admin`)
   - `OWNER_PASSWORD` (obligatoria, no se cambia desde la UI)
   - `APP_AUTH_SECRET` (default dev: `dev-secret-change-me`)
-- 2FA (TOTP) es obligatorio para OWNER y ADMINS (se configura desde **🔒 Seguridad**).
 - Los usuarios/sesiones/logs se guardan en `db/security/*` (la carpeta `db/` está ignorada por git).
 
 ## Desarrollo (web)
