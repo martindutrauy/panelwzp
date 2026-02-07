@@ -28,6 +28,11 @@ export type Device = Prisma.DeviceModel
  */
 export type Chat = Prisma.ChatModel
 /**
+ * Model ChatAlias
+ * 
+ */
+export type ChatAlias = Prisma.ChatAliasModel
+/**
  * Model Message
  * 
  */

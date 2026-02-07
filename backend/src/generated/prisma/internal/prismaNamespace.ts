@@ -386,6 +386,7 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 export const ModelName = {
   Device: 'Device',
   Chat: 'Chat',
+  ChatAlias: 'ChatAlias',
   Message: 'Message',
   RetentionPolicy: 'RetentionPolicy'
 } as const
@@ -403,7 +404,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "device" | "chat" | "message" | "retentionPolicy"
+    modelProps: "device" | "chat" | "chatAlias" | "message" | "retentionPolicy"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -536,6 +537,72 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.ChatCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.ChatCountAggregateOutputType> | number
+        }
+      }
+    }
+    ChatAlias: {
+      payload: Prisma.$ChatAliasPayload<ExtArgs>
+      fields: Prisma.ChatAliasFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ChatAliasFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ChatAliasFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        findFirst: {
+          args: Prisma.ChatAliasFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ChatAliasFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        findMany: {
+          args: Prisma.ChatAliasFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>[]
+        }
+        create: {
+          args: Prisma.ChatAliasCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        createMany: {
+          args: Prisma.ChatAliasCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        delete: {
+          args: Prisma.ChatAliasDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        update: {
+          args: Prisma.ChatAliasUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        deleteMany: {
+          args: Prisma.ChatAliasDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ChatAliasUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        upsert: {
+          args: Prisma.ChatAliasUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ChatAliasPayload>
+        }
+        aggregate: {
+          args: Prisma.ChatAliasAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateChatAlias>
+        }
+        groupBy: {
+          args: Prisma.ChatAliasGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ChatAliasGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ChatAliasCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ChatAliasCountAggregateOutputType> | number
         }
       }
     }
@@ -738,6 +805,17 @@ export const ChatScalarFieldEnum = {
 export type ChatScalarFieldEnum = (typeof ChatScalarFieldEnum)[keyof typeof ChatScalarFieldEnum]
 
 
+export const ChatAliasScalarFieldEnum = {
+  id: 'id',
+  deviceId: 'deviceId',
+  chatId: 'chatId',
+  waChatId: 'waChatId',
+  createdAt: 'createdAt'
+} as const
+
+export type ChatAliasScalarFieldEnum = (typeof ChatAliasScalarFieldEnum)[keyof typeof ChatAliasScalarFieldEnum]
+
+
 export const MessageScalarFieldEnum = {
   id: 'id',
   deviceId: 'deviceId',
@@ -803,6 +881,16 @@ export const ChatOrderByRelevanceFieldEnum = {
 } as const
 
 export type ChatOrderByRelevanceFieldEnum = (typeof ChatOrderByRelevanceFieldEnum)[keyof typeof ChatOrderByRelevanceFieldEnum]
+
+
+export const ChatAliasOrderByRelevanceFieldEnum = {
+  id: 'id',
+  deviceId: 'deviceId',
+  chatId: 'chatId',
+  waChatId: 'waChatId'
+} as const
+
+export type ChatAliasOrderByRelevanceFieldEnum = (typeof ChatAliasOrderByRelevanceFieldEnum)[keyof typeof ChatAliasOrderByRelevanceFieldEnum]
 
 
 export const MessageOrderByRelevanceFieldEnum = {
@@ -965,6 +1053,7 @@ export type PrismaClientOptions = ({
 export type GlobalOmitConfig = {
   device?: Prisma.DeviceOmit
   chat?: Prisma.ChatOmit
+  chatAlias?: Prisma.ChatAliasOmit
   message?: Prisma.MessageOmit
   retentionPolicy?: Prisma.RetentionPolicyOmit
 }

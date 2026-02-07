@@ -167,16 +167,31 @@ function resolveCanonicalChatId(store: SimpleStore | undefined, chatId: string):
     // 3. Para LIDs, SOLO usar mapeo explícito (no fusionar arbitrariamente)
     if (isLid(chatId)) {
         const phoneNumber = store.lidToPhone.get(chatId);
-        if (phoneNumber && store.chats.has(phoneNumber)) {
+        if (!phoneNumber) return chatId;
+        if (store.chats.has(chatId) && !store.chats.has(phoneNumber)) {
+            mergeChatData(store, chatId, phoneNumber);
+        } else {
             store.aliases.set(chatId, phoneNumber);
-            return phoneNumber;
         }
-        // LID sin mapeo conocido -> mantener como está
-        return chatId;
+        return phoneNumber;
     }
     
     // 4. Para números de teléfono normales
     if (chatId.endsWith('@s.whatsapp.net')) {
+        const normalized = (() => {
+            const key = chatKeyOf(chatId);
+            if (!key) return chatId;
+            return `${key}@s.whatsapp.net`;
+        })();
+        if (normalized !== chatId) {
+            if (store.chats.has(chatId) && !store.chats.has(normalized)) {
+                mergeChatData(store, chatId, normalized);
+            } else {
+                store.aliases.set(chatId, normalized);
+            }
+            return normalized;
+        }
+
         const lid = store.phoneToLid.get(chatId);
         if (lid && store.chats.has(lid) && !store.chats.has(chatId)) {
             // El chat existe con LID pero no con número, migrar al número
@@ -184,24 +199,7 @@ function resolveCanonicalChatId(store: SimpleStore | undefined, chatId: string):
             return chatId;
         }
         
-        // Buscar solo variantes del MISMO número (con sufijo de dispositivo :0, :1, etc)
-        const key = chatKeyOf(chatId);
-        if (!key) return chatId;
-
-        // Solo buscar coincidencias entre @s.whatsapp.net con diferentes sufijos
-        let best = chatId;
-        for (const existingId of store.chats.keys()) {
-            // NO fusionar con LIDs basándose en chatKey
-            if (isLid(existingId)) continue;
-            if (!existingId.endsWith('@s.whatsapp.net')) continue;
-            if (chatKeyOf(existingId) !== key) continue;
-            best = preferredChatId(best, existingId);
-        }
-        
-        if (best !== chatId) {
-            store.aliases.set(chatId, best);
-        }
-        return best;
+        return chatId;
     }
 
     // Otros tipos de ID -> mantener como están
@@ -242,10 +240,13 @@ export class DeviceManager {
     private pairingCodeLastAt: Map<string, number> = new Map();
     private avatarFetchInFlight: Map<string, Set<string>> = new Map();
     private avatarFetchLastAt: Map<string, number> = new Map();
+    private groupSubjectFetchInFlight: Map<string, Set<string>> = new Map();
+    private groupSubjectFetchLastAt: Map<string, Map<string, number>> = new Map();
     private messageRetentionDays = 90;
     private messagesDbRoot = dbPath('messages');
     private messageWriteChains: Map<string, Promise<void>> = new Map();
     private recentPersistedIds: Map<string, { ids: string[]; set: Set<string> }> = new Map();
+    private dbAliasBackfillDone: Set<string> = new Set();
 
     private constructor() {
         ensureDir(DB_ROOT);
@@ -319,9 +320,165 @@ export class DeviceManager {
         } catch {}
     }
 
+    private normalizeDbWaChatId(raw: string): string {
+        const id = String(raw || '').trim();
+        if (!id) return id;
+        if (id.endsWith('@g.us')) return id;
+        if (id.endsWith('@lid')) return id;
+        if (id.endsWith('@s.whatsapp.net')) {
+            const prefix = id.split('@')[0] || id;
+            const base = prefix.split(':')[0] || prefix;
+            return `${base}@s.whatsapp.net`;
+        }
+        return id;
+    }
+
+    private async dbResolveChatForWaChatId(prisma: any, deviceId: string, waChatId: string) {
+        const id = String(waChatId || '').trim();
+        if (!deviceId || !id) return null;
+        const direct = await prisma.chat
+            .findUnique({
+                where: { deviceId_waChatId: { deviceId, waChatId: id } },
+                select: { id: true, waChatId: true, name: true, customName: true }
+            })
+            .catch(() => null);
+        if (direct) return direct;
+        const alias = await prisma.chatAlias
+            .findUnique({
+                where: { deviceId_waChatId: { deviceId, waChatId: id } },
+                select: { chatId: true }
+            })
+            .catch(() => null);
+        if (!alias?.chatId) return null;
+        return prisma.chat
+            .findUnique({
+                where: { id: String(alias.chatId) },
+                select: { id: true, waChatId: true, name: true, customName: true }
+            })
+            .catch(() => null);
+    }
+
+    private async dbEnsureChatAlias(prisma: any, deviceId: string, waChatId: string, chatId: string) {
+        const id = String(waChatId || '').trim();
+        const c = String(chatId || '').trim();
+        if (!deviceId || !id || !c) return;
+        await prisma.chatAlias
+            .upsert({
+                where: { deviceId_waChatId: { deviceId, waChatId: id } },
+                create: { deviceId, waChatId: id, chatId: c },
+                update: { chatId: c }
+            })
+            .catch(() => {});
+    }
+
+    private async dbBackfillChatAliasesForDevice(deviceId: string) {
+        const prisma = getPrisma();
+        if (!prisma) return;
+        const d = String(deviceId || '').trim();
+        if (!d) return;
+        if (this.dbAliasBackfillDone.has(d)) return;
+        this.dbAliasBackfillDone.add(d);
+
+        const chats: Array<{ id: string; waChatId: string; lastMessageAt: Date | null }> = await prisma.chat
+            .findMany({
+                where: { deviceId: d },
+                select: { id: true, waChatId: true, lastMessageAt: true }
+            })
+            .catch(() => []);
+
+        const groups = new Map<string, Array<{ id: string; waChatId: string; lastMessageAt: Date | null }>>();
+        for (const c of chats) {
+            const chatRowId = String(c?.id || '').trim();
+            const wa = String(c?.waChatId || '').trim();
+            if (!chatRowId || !wa) continue;
+            const normalized = this.normalizeDbWaChatId(wa);
+            await this.dbEnsureChatAlias(prisma as any, d, wa, chatRowId);
+            if (normalized && normalized !== wa) {
+                await this.dbEnsureChatAlias(prisma as any, d, normalized, chatRowId);
+            }
+
+            if (wa.endsWith('@s.whatsapp.net')) {
+                const key = normalized || wa;
+                const arr = groups.get(key) || [];
+                arr.push({ id: chatRowId, waChatId: wa, lastMessageAt: c.lastMessageAt || null });
+                groups.set(key, arr);
+            }
+        }
+
+        for (const [key, arr] of groups.entries()) {
+            if (arr.length <= 1) continue;
+            const sorted = arr
+                .slice()
+                .sort((a, b) => {
+                    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+                    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+                    if (tb !== ta) return tb - ta;
+                    return String(a.id).localeCompare(String(b.id));
+                });
+            const winner = sorted[0];
+            if (!winner?.id) continue;
+            for (let i = 1; i < sorted.length; i++) {
+                const loser = sorted[i];
+                if (!loser?.id || loser.id === winner.id) continue;
+                await prisma.message.updateMany({ where: { chatId: loser.id }, data: { chatId: winner.id } }).catch(() => {});
+                await prisma.chatAlias.updateMany({ where: { chatId: loser.id }, data: { chatId: winner.id } }).catch(() => {});
+                await prisma.chat.delete({ where: { id: loser.id } }).catch(() => {});
+                await this.dbEnsureChatAlias(prisma as any, d, loser.waChatId, winner.id);
+            }
+            if (key) {
+                await this.dbEnsureChatAlias(prisma as any, d, key, winner.id);
+            }
+        }
+    }
+
+    private async dbHydrateExplicitPeerMappingsFromAliases(deviceId: string, store: SimpleStore) {
+        const prisma = getPrisma();
+        if (!prisma) return;
+        const d = String(deviceId || '').trim();
+        if (!d) return;
+
+        const rows: Array<{ waChatId: string; chat?: { waChatId: string } | null }> = await prisma.chatAlias
+            .findMany({
+                where: { deviceId: d },
+                select: { waChatId: true, chat: { select: { waChatId: true } } }
+            })
+            .catch(() => []);
+
+        for (const r of rows) {
+            const aliasId = String(r?.waChatId || '').trim();
+            const canonical = String(r?.chat?.waChatId || '').trim();
+            if (!aliasId || !canonical) continue;
+
+            const aIsLid = aliasId.endsWith('@lid');
+            const aIsPhone = aliasId.endsWith('@s.whatsapp.net');
+            const cIsLid = canonical.endsWith('@lid');
+            const cIsPhone = canonical.endsWith('@s.whatsapp.net');
+
+            let lid: string | null = null;
+            let phone: string | null = null;
+            if (aIsLid && cIsPhone) {
+                lid = aliasId;
+                phone = this.normalizeDbWaChatId(canonical);
+            } else if (aIsPhone && cIsLid) {
+                lid = canonical;
+                phone = this.normalizeDbWaChatId(aliasId);
+            }
+
+            if (!lid || !phone || !phone.endsWith('@s.whatsapp.net')) continue;
+
+            store.lidToPhone.set(lid, phone);
+            store.phoneToLid.set(phone, lid);
+            store.aliases.set(lid, phone);
+            if (store.chats.has(lid) && !store.chats.has(phone)) {
+                mergeChatData(store, lid, phone);
+            }
+        }
+    }
+
     private async dbUpsertChatAndMessage(args: {
         deviceId: string;
         waChatId: string;
+        waChatIdAliases?: string[];
         chatName: string | null;
         isGroup: boolean;
         unreadCount: number;
@@ -352,70 +509,85 @@ export class DeviceManager {
         });
 
         try {
-            // Primero verificar si el chat ya existe y tiene un nombre establecido
-            const existingChat = await prisma.chat.findUnique({
-                where: { deviceId_waChatId: { deviceId, waChatId } },
-                select: { id: true, name: true, customName: true }
-            });
-            
-            // Determinar el nombre a usar:
-            // - Si hay customName, NUNCA sobrescribir el name
-            // - Si ya hay un name válido, solo actualizar si el nuevo es mejor (más largo/descriptivo)
-            // - Si no hay name, usar el nuevo
-            let nameToUse: string | null = null;
+            const canonicalCandidate = this.normalizeDbWaChatId(waChatId);
+            const allIds = new Set<string>();
+            allIds.add(waChatId);
+            if (canonicalCandidate) allIds.add(canonicalCandidate);
+            if (Array.isArray(args.waChatIdAliases)) {
+                for (const a of args.waChatIdAliases) {
+                    const s = String(a || '').trim();
+                    if (s) allIds.add(s);
+                }
+            }
+
+            let resolvedChat: any = null;
+            for (const id of allIds) {
+                resolvedChat = await this.dbResolveChatForWaChatId(prisma as any, deviceId, id);
+                if (resolvedChat) break;
+            }
+
+            const existingChat = resolvedChat;
             const newName = args.chatName ? String(args.chatName).trim() : null;
-            
-            if (existingChat) {
-                // Chat existe
+            let nameToUse: string | null = null;
+
+            const isGroup = Boolean(args.isGroup);
+            if (isGroup) {
+                nameToUse = newName || (existingChat?.name ? String(existingChat.name).trim() : null);
+            } else if (existingChat) {
                 if (existingChat.customName) {
-                    // Tiene customName, mantener el name original
                     nameToUse = existingChat.name;
                 } else if (existingChat.name && existingChat.name.trim()) {
-                    // Tiene name, solo actualizar si el nuevo es más descriptivo
-                    // (evita que un pushName corto sobrescriba uno más completo)
                     const existingLen = existingChat.name.trim().length;
                     const newLen = newName ? newName.length : 0;
                     nameToUse = newLen > existingLen ? newName : existingChat.name;
                 } else {
-                    // No tiene name, usar el nuevo
                     nameToUse = newName;
                 }
             } else {
-                // Chat nuevo
                 nameToUse = newName;
             }
-            
-            const chat = await prisma.chat.upsert({
-                where: { deviceId_waChatId: { deviceId, waChatId } },
-                create: {
-                    deviceId,
-                    waChatId,
-                    name: nameToUse,
-                    isGroup: Boolean(args.isGroup),
-                    unreadCount: Math.max(0, Math.floor(Number(args.unreadCount || 0))),
-                    lastMessageAt: new Date(Number(args.lastMessageAtMs || Date.now())),
-                    profilePhotoUrl: args.profilePhotoUrl ? String(args.profilePhotoUrl) : null
-                },
-                update: {
-                    // Solo actualizar name si determinamos que debe cambiar
-                    ...(nameToUse !== existingChat?.name ? { name: nameToUse } : {}),
-                    isGroup: Boolean(args.isGroup),
-                    unreadCount: Math.max(0, Math.floor(Number(args.unreadCount || 0))),
-                    lastMessageAt: new Date(Number(args.lastMessageAtMs || Date.now())),
-                    profilePhotoUrl: args.profilePhotoUrl ? String(args.profilePhotoUrl) : undefined
-                },
-                select: { id: true }
-            });
+
+            let chatId: string = String(existingChat?.id || '').trim();
+            if (!chatId) {
+                const created = await prisma.chat.create({
+                    data: {
+                        deviceId,
+                        waChatId: canonicalCandidate || waChatId,
+                        name: nameToUse,
+                        isGroup: Boolean(args.isGroup),
+                        unreadCount: Math.max(0, Math.floor(Number(args.unreadCount || 0))),
+                        lastMessageAt: new Date(Number(args.lastMessageAtMs || Date.now())),
+                        profilePhotoUrl: args.profilePhotoUrl ? String(args.profilePhotoUrl) : null
+                    },
+                    select: { id: true }
+                });
+                chatId = String(created?.id || '').trim();
+            } else {
+                await prisma.chat.update({
+                    where: { id: chatId },
+                    data: {
+                        ...(nameToUse !== existingChat?.name ? { name: nameToUse } : {}),
+                        isGroup: Boolean(args.isGroup),
+                        unreadCount: Math.max(0, Math.floor(Number(args.unreadCount || 0))),
+                        lastMessageAt: new Date(Number(args.lastMessageAtMs || Date.now())),
+                        profilePhotoUrl: args.profilePhotoUrl ? String(args.profilePhotoUrl) : undefined
+                    },
+                    select: { id: true }
+                });
+            }
+
+            for (const id of allIds) {
+                await this.dbEnsureChatAlias(prisma as any, deviceId, id, chatId);
+            }
 
             const waMessageId = args.waMessageId ? String(args.waMessageId) : '';
             if (!waMessageId) return;
 
-            // Usar upsert para evitar duplicados y actualizar si ya existe
             await prisma.message.upsert({
                 where: { waMessageId },
                 create: {
                     deviceId,
-                    chatId: chat.id,
+                    chatId,
                     waMessageId,
                     fromMe: Boolean(args.fromMe),
                     source: String(args.source || 'whatsapp'),
@@ -427,12 +599,9 @@ export class DeviceManager {
                     rawJson: args.rawJson ? String(args.rawJson) : null
                 },
                 update: {
-                    // Solo actualizar campos que podrían cambiar (status, etc.)
-                    // No sobrescribir datos existentes
                 }
             });
         } catch (e: any) {
-            // Silenciar errores de constraint (por si acaso)
             const code = String(e?.code || '');
             if (code === 'P2002' || code === 'P2025') return;
         }
@@ -678,6 +847,141 @@ export class DeviceManager {
             this.devices = rawData.map((device: Device) =>
                 decryptSensitiveFields(device, ['phoneNumber', 'qr'])
             );
+        }
+
+        this.migrateDeviceNamesToSucursal();
+    }
+
+    private migrateDeviceNamesToSucursal() {
+        const sucursalRegex = /^sucursal\s+(\d+)\s*$/i;
+        const used = new Set<number>();
+        for (const d of this.devices || []) {
+            const m = String((d as any)?.name || '').trim().match(sucursalRegex);
+            if (m && m[1]) {
+                const n = Number(m[1]);
+                if (Number.isFinite(n) && n > 0) used.add(n);
+            }
+        }
+
+        const nextAvailable = () => {
+            let i = 1;
+            while (used.has(i)) i++;
+            used.add(i);
+            return i;
+        };
+
+        let changed = false;
+        for (const d of this.devices || []) {
+            const current = String((d as any)?.name || '').trim();
+            const isSucursal = sucursalRegex.test(current);
+            const isCloudLike = /^cloud[\s\-_:]?/i.test(current) || current.toLowerCase().includes('cloud-');
+            if (isSucursal) continue;
+            if (!isCloudLike) continue;
+            const n = nextAvailable();
+            (d as any).name = `Sucursal ${n}`;
+            changed = true;
+            void this.dbUpsertDeviceRecord(d as any);
+            this.io?.emit('device:update', d);
+        }
+
+        if (changed) {
+            this.saveDevices();
+        }
+    }
+
+    private async ensureGroupSubject(deviceId: string, groupId: string, sock: any, store: SimpleStore, lastMessageAtMs: number, force: boolean = false): Promise<string | null> {
+        const d = String(deviceId || '').trim();
+        const gid = String(groupId || '').trim();
+        if (!d || !gid || !gid.endsWith('@g.us')) return null;
+
+        const now = Date.now();
+        const deviceMap = this.groupSubjectFetchLastAt.get(d) || new Map<string, number>();
+        this.groupSubjectFetchLastAt.set(d, deviceMap);
+        const lastAt = Number(deviceMap.get(gid) || 0);
+        const cached = String(store.chats.get(gid)?.name || '').trim();
+        if (!force && now - lastAt < 5 * 60 * 1000) return cached || null;
+
+        const inFlight = this.groupSubjectFetchInFlight.get(d) || new Set<string>();
+        if (inFlight.has(gid)) return cached || null;
+        inFlight.add(gid);
+        this.groupSubjectFetchInFlight.set(d, inFlight);
+
+        try {
+            const metadata = await sock.groupMetadata(gid).catch(() => null);
+            const subject = String((metadata as any)?.subject || '').trim();
+            if (!subject) return cached || null;
+
+            const existing = store.chats.get(gid) || { id: gid, name: subject, conversationTimestamp: lastMessageAtMs || now, unreadCount: 0 };
+            existing.name = subject;
+            store.chats.set(gid, existing);
+            store.contacts.delete(gid);
+            store.lastPushName.delete(gid);
+
+            deviceMap.set(gid, now);
+
+            const prisma = getPrisma();
+            if (prisma) {
+                void this.dbUpsertChatAndMessage({
+                    deviceId: d,
+                    waChatId: gid,
+                    chatName: subject,
+                    isGroup: true,
+                    unreadCount: Number(existing?.unreadCount || 0),
+                    lastMessageAtMs: Number(existing?.conversationTimestamp || lastMessageAtMs || now),
+                    profilePhotoUrl: store.profilePhotos.get(gid)?.url || null,
+                    waMessageId: null,
+                    fromMe: false,
+                    source: 'whatsapp',
+                    type: 'text',
+                    text: null,
+                    mediaPath: null,
+                    rawJson: null
+                });
+            }
+
+            this.io?.emit('chat:name:update', { deviceId: d, chatId: gid, name: subject });
+            return subject;
+        } finally {
+            const set = this.groupSubjectFetchInFlight.get(d);
+            if (set) set.delete(gid);
+        }
+    }
+
+    private async dbBackfillGroupSubjectsForDevice(deviceId: string, sock: any, store: SimpleStore) {
+        const prisma = getPrisma();
+        if (!prisma) return;
+        const d = String(deviceId || '').trim();
+        if (!d) return;
+
+        const rows: Array<{ id: string; waChatId: string; name: string | null; lastMessageAt: Date | null; unreadCount: number | null }> = await prisma.chat
+            .findMany({
+                where: { deviceId: d, isGroup: true },
+                select: { id: true, waChatId: true, name: true, lastMessageAt: true, unreadCount: true }
+            })
+            .catch(() => []);
+
+        for (const r of rows) {
+            const gid = String(r?.waChatId || '').trim();
+            if (!gid.endsWith('@g.us')) continue;
+            const metadata = await sock.groupMetadata(gid).catch(() => null);
+            const subject = String((metadata as any)?.subject || '').trim();
+            if (!subject) continue;
+
+            const currentDbName = String(r?.name || '').trim();
+            if (currentDbName !== subject) {
+                await prisma.chat.update({ where: { id: String(r.id) }, data: { name: subject } }).catch(() => {});
+            }
+
+            const ts = r?.lastMessageAt ? new Date(r.lastMessageAt).getTime() : Date.now();
+            const existing = store.chats.get(gid) || { id: gid, name: subject, conversationTimestamp: ts, unreadCount: Number(r?.unreadCount || 0) };
+            existing.name = subject;
+            store.chats.set(gid, existing);
+            store.contacts.delete(gid);
+            store.lastPushName.delete(gid);
+
+            const deviceMap = this.groupSubjectFetchLastAt.get(d) || new Map<string, number>();
+            deviceMap.set(gid, Date.now());
+            this.groupSubjectFetchLastAt.set(d, deviceMap);
         }
     }
 
@@ -1212,17 +1516,15 @@ export class DeviceManager {
 
         if (store) {
             const pushName = msg?.pushName;
-            if (pushName && !fromMe && unifiedChatId) {
+            const isGroup = unifiedChatId.endsWith('@g.us');
+            if (pushName && !fromMe && unifiedChatId && !isGroup) {
                 store.contacts.set(unifiedChatId, pushName);
             }
-            const contactName = store.contacts.get(unifiedChatId) || store.contacts.get(chatId) || pushName;
-
-            let chatName: string;
-            if (unifiedChatId.endsWith('@g.us')) {
-                chatName = contactName || unifiedChatId.split('@')[0] + ' (Grupo)';
-            } else {
-                chatName = contactName || unifiedChatId.split('@')[0];
-            }
+            const groupSubject = isGroup ? String(store.chats.get(unifiedChatId)?.name || '').trim() : '';
+            const contactName = isGroup ? null : (store.contacts.get(unifiedChatId) || store.contacts.get(chatId) || pushName || null);
+            const chatName = isGroup
+                ? (groupSubject || unifiedChatId.split('@')[0] + ' (Grupo)')
+                : (String(contactName || '').trim() || unifiedChatId.split('@')[0]);
 
             const existingChat = store.chats.get(unifiedChatId) || {
                 id: unifiedChatId,
@@ -1230,8 +1532,11 @@ export class DeviceManager {
                 conversationTimestamp: timestamp,
                 unreadCount: 0
             };
-            if (contactName && existingChat.name !== contactName) {
-                existingChat.name = contactName;
+            if (!isGroup && contactName && existingChat.name !== contactName) {
+                existingChat.name = String(contactName);
+            }
+            if (isGroup && groupSubject && existingChat.name !== groupSubject) {
+                existingChat.name = groupSubject;
             }
             existingChat.conversationTimestamp = Math.max(Number(existingChat.conversationTimestamp || 0), timestamp);
             store.chats.set(unifiedChatId, existingChat);
@@ -1266,6 +1571,7 @@ export class DeviceManager {
                 void this.dbUpsertChatAndMessage({
                     deviceId,
                     waChatId: unifiedChatId,
+                    waChatIdAliases: unifiedChatId !== chatId ? [chatId] : undefined,
                     chatName: String(existingChat?.name || chatName || '').trim() || null,
                     isGroup: unifiedChatId.endsWith('@g.us'),
                     unreadCount: Number(existingChat?.unreadCount || 0),
@@ -1309,6 +1615,8 @@ export class DeviceManager {
         const store = stores.get(deviceId) || createSimpleStore();
         stores.set(deviceId, store);
         await this.restoreMessagesFromDisk(deviceId, store);
+        await this.dbBackfillChatAliasesForDevice(deviceId);
+        await this.dbHydrateExplicitPeerMappingsFromAliases(deviceId, store);
 
         const currentMode = this.pairingMode.get(deviceId) || mode || 'qr';
         
@@ -1404,6 +1712,8 @@ export class DeviceManager {
                 this.reconnectAttempts.set(deviceId, 0);
                 const phoneNumber = sock.user?.id.split(':')[0] || null;
                 this.updateDevice(deviceId, { status: 'CONNECTED', phoneNumber, qr: null });
+                const s = stores.get(deviceId);
+                if (s) void this.dbBackfillGroupSubjectsForDevice(deviceId, sock, s);
             }
         });
 
@@ -1426,7 +1736,9 @@ export class DeviceManager {
                     if (!id) continue;
                     const tsSec = Number(ch?.conversationTimestamp || ch?.lastMessageRecvTimestamp || 0);
                     const ts = Number.isFinite(tsSec) && tsSec > 0 ? tsSec * 1000 : Date.now();
-                    const name = String(ch?.name || store.contacts.get(id) || '').trim() || id.split('@')[0];
+                    const isGroup = id.endsWith('@g.us');
+                    const baseName = isGroup ? String(ch?.name || '').trim() : String(ch?.name || store.contacts.get(id) || '').trim();
+                    const name = baseName || id.split('@')[0];
                     const canonical = resolveCanonicalChatId(store, id);
                     if (canonical !== id) mergeChatData(store, id, canonical);
                     const existing = store.chats.get(canonical) || { id: canonical, name, conversationTimestamp: ts, unreadCount: 0 };
@@ -1442,6 +1754,7 @@ export class DeviceManager {
                         void this.dbUpsertChatAndMessage({
                             deviceId,
                             waChatId: canonical,
+                            waChatIdAliases: canonical !== id ? [id] : undefined,
                             chatName: String(existing?.name || name || '').trim() || null,
                             isGroup: canonical.endsWith('@g.us'),
                             unreadCount: Number(existing?.unreadCount || 0),
@@ -1543,7 +1856,10 @@ export class DeviceManager {
                     
                     // IMPORTANTE: Solo guardar pushName para el ID ORIGINAL del mensaje
                     // No para el unifiedChatId si son diferentes (evita mezclar nombres)
-                    if (pushName && !msg.key.fromMe && originalChatId) {
+                    const isGroupChat = String(unifiedChatId || '').endsWith('@g.us');
+                    const isOriginalGroup = String(originalChatId || '').endsWith('@g.us');
+
+                    if (pushName && !msg.key.fromMe && originalChatId && !isOriginalGroup) {
                         const targetId = originalChatId; // Usar ID original, NO el unificado
                         const existingName = store.contacts.get(targetId);
                         const lastKnown = store.lastPushName.get(targetId);
@@ -1554,7 +1870,7 @@ export class DeviceManager {
                             store.lastPushName.set(targetId, pushName);
                             
                             // Si el unificado es diferente y NO tiene nombre propio, también asignar
-                            if (unifiedChatId !== originalChatId && !store.contacts.get(unifiedChatId)) {
+                            if (unifiedChatId !== originalChatId && !store.contacts.get(unifiedChatId) && !isGroupChat) {
                                 store.contacts.set(unifiedChatId, pushName);
                             }
                             
@@ -1570,16 +1886,22 @@ export class DeviceManager {
                     }
 
                     // Obtener nombre del contacto - priorizar el ID específico del chat
-                    const contactName = store.contacts.get(unifiedChatId) || 
-                                       store.contacts.get(originalChatId) ||
-                                       pushName;
+                    const groupContaminated = isGroupChat && (store.contacts.has(unifiedChatId) || store.lastPushName.has(unifiedChatId));
+                    let groupSubject = isGroupChat && !groupContaminated ? String(store.chats.get(unifiedChatId)?.name || '').trim() : '';
+                    const contactName = isGroupChat
+                        ? null
+                        : (store.contacts.get(unifiedChatId) || store.contacts.get(originalChatId) || pushName || null);
 
                     // Determinar el nombre del chat
                     let chatName: string;
-                    if (unifiedChatId.endsWith('@g.us')) {
-                        chatName = contactName || unifiedChatId.split('@')[0] + ' (Grupo)';
+                    if (isGroupChat) {
+                        if (!groupSubject || groupContaminated) {
+                            const fetched = await this.ensureGroupSubject(deviceId, unifiedChatId, sock, store, timestamp, true);
+                            if (fetched) groupSubject = fetched;
+                        }
+                        chatName = groupSubject || String(unifiedChatId.split('@')[0] || unifiedChatId) + ' (Grupo)';
                     } else {
-                        chatName = contactName || unifiedChatId.split('@')[0];
+                        chatName = String(contactName || '').trim() || String(unifiedChatId.split('@')[0] || unifiedChatId);
                     }
 
                     // Actualizar/crear chat usando unifiedChatId
@@ -1591,8 +1913,11 @@ export class DeviceManager {
                     };
                     
                     // Actualizar nombre si encontramos uno mejor
-                    if (contactName && existingChat.name !== contactName) {
-                        existingChat.name = contactName;
+                    if (!isGroupChat && contactName && existingChat.name !== contactName) {
+                        existingChat.name = String(contactName);
+                    }
+                    if (isGroupChat && groupSubject && existingChat.name !== groupSubject) {
+                        existingChat.name = groupSubject;
                     }
                     
                     existingChat.conversationTimestamp = timestamp;
@@ -1627,6 +1952,7 @@ export class DeviceManager {
                     void this.dbUpsertChatAndMessage({
                         deviceId,
                         waChatId: unifiedChatId,
+                        waChatIdAliases: unifiedChatId !== originalChatId ? [originalChatId] : undefined,
                         chatName: String(existingChat?.name || chatName || '').trim() || null,
                         isGroup: unifiedChatId.endsWith('@g.us'),
                         unreadCount: Number(existingChat?.unreadCount || 0),
@@ -2245,9 +2571,14 @@ export class DeviceManager {
                     // Función para extraer clave única de un chatId
                     const getChatKey = (id: string): string => {
                         if (!id) return '';
-                        if (id.includes('@g.us')) return id; // Grupos son únicos
-                        const prefix = id.split('@')[0] || id;
-                        return prefix.split(':')[0] || prefix;
+                        if (id.includes('@g.us')) return `g:${id}`;
+                        if (String(id).endsWith('@lid')) return `lid:${id}`;
+                        if (String(id).endsWith('@s.whatsapp.net')) {
+                            const prefix = id.split('@')[0] || id;
+                            const base = prefix.split(':')[0] || prefix;
+                            return `p:${base}`;
+                        }
+                        return `o:${id}`;
                     };
                     
                     // Mapear los datos de Prisma
@@ -2290,11 +2621,11 @@ export class DeviceManager {
                             }
                         }
 
-                        // Priorizar: customName (nombre personalizado) > name (pushName de WhatsApp) > número
                         const customName = (c as any).customName || null;
-                        const displayName = customName 
-                            ? String(customName).trim() 
-                            : (String(c.name || '').trim() || c.waChatId.split('@')[0]);
+                        const isGroup = Boolean(c.isGroup);
+                        const displayName = isGroup
+                            ? (String(c.name || '').trim() || c.waChatId.split('@')[0] + ' (Grupo)')
+                            : (customName ? String(customName).trim() : (String(c.name || '').trim() || c.waChatId.split('@')[0]));
                         
                         const lastMessageTime = c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : Date.now();
                         
@@ -2405,6 +2736,12 @@ export class DeviceManager {
                 return [];
             }
 
+            const groupIds = Array.from(store.chats.keys()).filter((id) => String(id || '').endsWith('@g.us'));
+            for (const gid of groupIds) {
+                const ts = Number(store.chats.get(gid)?.conversationTimestamp || Date.now());
+                await this.ensureGroupSubject(deviceId, gid, sock, store, ts, true);
+            }
+
             // Obtener todos los chats almacenados
             const chats = Array.from(store.chats.values());
             console.log(`[${deviceId}] Chats encontrados en store: ${chats.length}`);
@@ -2419,11 +2756,14 @@ export class DeviceManager {
                 
                 // Obtener nombre SOLO del contacto específico de este chat
                 // NO buscar en otros IDs para evitar mezcla de nombres
-                const contactName = store.contacts.get(chatId);
                 const chatName = String(chat?.name || '').trim();
+                const isGroup = chatId.endsWith('@g.us');
+                const contactName = isGroup ? null : store.contacts.get(chatId);
                 
                 // Prioridad: contactName del ID específico > nombre del chat > ID limpio
-                const displayName = contactName || chatName || chatId.split('@')[0];
+                const displayName = isGroup
+                    ? (chatName || String(chatId.split('@')[0] || chatId) + ' (Grupo)')
+                    : (String(contactName || '').trim() || chatName || String(chatId.split('@')[0] || chatId));
                 const lastMessageTime = ts || Date.now();
                 const profilePhotoUrl = store.profilePhotos.get(chatId)?.url || null;
                 
@@ -2467,9 +2807,14 @@ export class DeviceManager {
             // Mantener el más reciente de cada número
             const getChatKey = (id: string): string => {
                 if (!id) return '';
-                if (id.includes('@g.us')) return id; // Grupos son únicos
-                const prefix = id.split('@')[0] || id;
-                return prefix.split(':')[0] || prefix; // Extraer número base
+                if (id.includes('@g.us')) return `g:${id}`;
+                if (String(id).endsWith('@lid')) return `lid:${id}`;
+                if (String(id).endsWith('@s.whatsapp.net')) {
+                    const prefix = id.split('@')[0] || id;
+                    const base = prefix.split(':')[0] || prefix;
+                    return `p:${base}`;
+                }
+                return `o:${id}`;
             };
             
             const seenKeys = new Map<string, typeof result[0]>();
@@ -2527,10 +2872,11 @@ export class DeviceManager {
                 console.log(`[${deviceId}] Chat marcado como leído: ${canonicalId}`);
                 const prisma = getPrisma();
                 if (prisma) {
-                    void prisma.chat.update({
-                        where: { deviceId_waChatId: { deviceId, waChatId: canonicalId } },
-                        data: { unreadCount: 0 }
-                    }).catch(() => {});
+                    void (async () => {
+                        const row = await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalId);
+                        if (!row?.id) return;
+                        await prisma.chat.update({ where: { id: String(row.id) }, data: { unreadCount: 0 } }).catch(() => {});
+                    })();
                 }
                 if (hadUnread) {
                     this.io?.emit('device:unread:update', {
@@ -2562,9 +2908,10 @@ export class DeviceManager {
 
             // 1.5 Eliminar en MySQL (si aplica)
             if (prisma) {
-                await prisma.chat.delete({
-                    where: { deviceId_waChatId: { deviceId, waChatId: canonicalId } }
-                }).catch(() => {});
+                const row = await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalId);
+                if (row?.id) {
+                    await prisma.chat.delete({ where: { id: String(row.id) } }).catch(() => {});
+                }
             }
 
             // 2. Eliminar del store local
@@ -2587,9 +2934,10 @@ export class DeviceManager {
             console.error(`[${deviceId}] Error eliminando chat:`, error);
             // Intentar eliminar localmente aunque falle remoto
             if (prisma) {
-                await prisma.chat.delete({
-                    where: { deviceId_waChatId: { deviceId, waChatId: canonicalId } }
-                }).catch(() => {});
+                const row = await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalId);
+                if (row?.id) {
+                    await prisma.chat.delete({ where: { id: String(row.id) } }).catch(() => {});
+                }
             }
             if (store) {
                 store.chats.delete(canonicalId);
@@ -2619,16 +2967,13 @@ export class DeviceManager {
             if (prisma) {
                 const storeForCanonical = stores.get(deviceId);
                 const canonicalId = storeForCanonical ? resolveCanonicalChatId(storeForCanonical, chatId) : chatId;
-
-                const chatRow = await prisma.chat.findUnique({
-                    where: { deviceId_waChatId: { deviceId, waChatId: canonicalId } },
-                    select: { id: true }
-                });
-                if (!chatRow) return [];
+                const chatRow = (await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalId)) ||
+                    (canonicalId !== chatId ? await this.dbResolveChatForWaChatId(prisma as any, deviceId, chatId) : null);
+                if (!chatRow?.id) return [];
 
                 const take = Math.max(1, Math.min(500, Math.floor(Number(limit || 50))));
                 const msgs = await prisma.message.findMany({
-                    where: { deviceId, chatId: chatRow.id },
+                    where: { deviceId, chatId: String(chatRow.id) },
                     orderBy: { timestamp: 'desc' },
                     take
                 });
@@ -2799,14 +3144,23 @@ export class DeviceManager {
     public async renameChat(deviceId: string, chatId: string, customName: string | null) {
         const store = stores.get(deviceId);
         const canonicalChatId = resolveCanonicalChatId(store, chatId);
-        
-        // Extraer el número base para actualizar TODOS los registros del mismo contacto
-        const chatKey = chatKeyOf(canonicalChatId);
+        const stableKeyOf = (id: string) => {
+            const s = String(id || '').trim();
+            if (!s) return '';
+            if (s.endsWith('@g.us')) return `g:${s}`;
+            if (s.endsWith('@lid')) return `lid:${s}`;
+            if (s.endsWith('@s.whatsapp.net')) return `p:${chatKeyOf(s)}`;
+            return `o:${s}`;
+        };
         
         // Intentar actualizar en la base de datos si está disponible
         const prisma = getPrisma();
         if (prisma) {
             try {
+                const resolved = await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalChatId);
+                const canonicalDbId = String(resolved?.waChatId || canonicalChatId);
+                const chatKey = stableKeyOf(canonicalDbId);
+
                 // Buscar TODOS los chats del dispositivo
                 const allChats = await prisma.chat.findMany({
                     where: { deviceId },
@@ -2815,7 +3169,7 @@ export class DeviceManager {
                 });
                 
                 // 1. Encontrar registros con el mismo número base
-                const relatedByKey = allChats.filter(c => chatKeyOf(c.waChatId) === chatKey);
+                const relatedByKey = allChats.filter((c) => stableKeyOf(c.waChatId) === chatKey);
                 
                 // 2. Si estamos poniendo un customName, buscar otros chats que YA tienen ese customName
                 //    (para fusionarlos - eliminar los duplicados)
@@ -2824,7 +3178,7 @@ export class DeviceManager {
                     ? allChats.filter(c => 
                         c.customName && 
                         c.customName.toLowerCase().trim() === normalizedNewName &&
-                        chatKeyOf(c.waChatId) !== chatKey // No incluir el que estamos renombrando
+                        stableKeyOf(c.waChatId) !== chatKey
                     )
                     : [];
                 
@@ -2862,10 +3216,13 @@ export class DeviceManager {
                 console.warn(`[${deviceId}] No se pudo guardar customName en DB:`, dbError.message);
                 // Fallback: intentar actualizar solo el canonicalChatId
                 try {
-                    await prisma.chat.updateMany({
-                        where: { deviceId, waChatId: canonicalChatId },
-                        data: { customName: customName ? customName.trim() : null }
-                    });
+                    const resolved = await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalChatId);
+                    if (resolved?.id) {
+                        await prisma.chat.update({
+                            where: { id: String(resolved.id) },
+                            data: { customName: customName ? customName.trim() : null }
+                        });
+                    }
                 } catch {}
             }
         }
@@ -2878,7 +3235,7 @@ export class DeviceManager {
             }
         }
         
-        console.log(`[${deviceId}] Chat ${canonicalChatId} (key: ${chatKey}) renombrado a: ${customName || '(sin nombre personalizado)'}`);
+        console.log(`[${deviceId}] Chat ${canonicalChatId} renombrado a: ${customName || '(sin nombre personalizado)'}`);
         
         return { 
             chatId: canonicalChatId, 
@@ -2905,19 +3262,15 @@ export class DeviceManager {
             const canonicalChatId = options?.chatId
                 ? (storeForCanonical ? resolveCanonicalChatId(storeForCanonical, options.chatId) : options.chatId)
                 : null;
-
-            const chatWhere = canonicalChatId
-                ? { deviceId_waChatId: { deviceId, waChatId: canonicalChatId } }
-                : null;
-
-            const chatRow = chatWhere
-                ? await prisma.chat.findUnique({ where: chatWhere, select: { id: true, waChatId: true, name: true } })
+            const chatRow = canonicalChatId
+                ? ((await this.dbResolveChatForWaChatId(prisma as any, deviceId, canonicalChatId)) ||
+                    (options?.chatId && options.chatId !== canonicalChatId ? await this.dbResolveChatForWaChatId(prisma as any, deviceId, options.chatId) : null))
                 : null;
 
             const msgs = await prisma.message.findMany({
                 where: {
                     deviceId,
-                    ...(chatRow ? { chatId: chatRow.id } : {}),
+                    ...(chatRow?.id ? { chatId: String(chatRow.id) } : {}),
                     ...(fromMeFilter === undefined ? {} : { fromMe: fromMeFilter }),
                     text: { contains: q }
                 },

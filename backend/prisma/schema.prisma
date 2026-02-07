@@ -24,6 +24,7 @@ model Device {
   lastUpdate      DateTime @updatedAt
   sessions        Message[]
   chats           Chat[]
+  chatAliases     ChatAlias[]
 }
 
 model Chat {
@@ -39,8 +40,22 @@ model Chat {
   lastMessageAt   DateTime @default(now())
   profilePhotoUrl String?
   messages        Message[]
+  aliases         ChatAlias[]
 
   @@unique([deviceId, waChatId])
+}
+
+model ChatAlias {
+  id        String   @id @default(uuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id])
+  chatId    String
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  waChatId  String
+  createdAt DateTime @default(now())
+
+  @@unique([deviceId, waChatId])
+  @@index([deviceId, chatId])
 }
 
 model Message {

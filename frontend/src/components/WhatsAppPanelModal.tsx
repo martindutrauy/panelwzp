@@ -653,7 +653,7 @@ export const WhatsAppPanelModal = ({ visible, onClose }: { visible: boolean, onC
                             letterSpacing: '1px',
                             textShadow: '0 0 20px rgba(212, 175, 55, 0.3)'
                         }}>
-                            ✨ "Gracias Tincho, lo estás haciendo muy bien!" ✨
+                            Test 7/2 17:58 hs. Martin
                         </Text>
                     </div>
                 </>

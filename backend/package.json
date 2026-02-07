@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "nodemon src/index.ts",
+    "dev": "nodemon --watch src --ext ts,json --exec \"ts-node src/index.ts\"",
     "start": "node dist/index.js",
     "build": "prisma generate && tsc -p tsconfig.json",
     "start:prod": "node dist/index.js",

@@ -10,6 +10,7 @@
  */
 export type * from './models/Device'
 export type * from './models/Chat'
+export type * from './models/ChatAlias'
 export type * from './models/Message'
 export type * from './models/RetentionPolicy'
 export type * from './commonInputTypes'

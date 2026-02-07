@@ -53,6 +53,7 @@ export const AnyNull = runtime.AnyNull
 export const ModelName = {
   Device: 'Device',
   Chat: 'Chat',
+  ChatAlias: 'ChatAlias',
   Message: 'Message',
   RetentionPolicy: 'RetentionPolicy'
 } as const
@@ -99,6 +100,17 @@ export const ChatScalarFieldEnum = {
 } as const
 
 export type ChatScalarFieldEnum = (typeof ChatScalarFieldEnum)[keyof typeof ChatScalarFieldEnum]
+
+
+export const ChatAliasScalarFieldEnum = {
+  id: 'id',
+  deviceId: 'deviceId',
+  chatId: 'chatId',
+  waChatId: 'waChatId',
+  createdAt: 'createdAt'
+} as const
+
+export type ChatAliasScalarFieldEnum = (typeof ChatAliasScalarFieldEnum)[keyof typeof ChatAliasScalarFieldEnum]
 
 
 export const MessageScalarFieldEnum = {
@@ -166,6 +178,16 @@ export const ChatOrderByRelevanceFieldEnum = {
 } as const
 
 export type ChatOrderByRelevanceFieldEnum = (typeof ChatOrderByRelevanceFieldEnum)[keyof typeof ChatOrderByRelevanceFieldEnum]
+
+
+export const ChatAliasOrderByRelevanceFieldEnum = {
+  id: 'id',
+  deviceId: 'deviceId',
+  chatId: 'chatId',
+  waChatId: 'waChatId'
+} as const
+
+export type ChatAliasOrderByRelevanceFieldEnum = (typeof ChatAliasOrderByRelevanceFieldEnum)[keyof typeof ChatAliasOrderByRelevanceFieldEnum]
 
 
 export const MessageOrderByRelevanceFieldEnum = {

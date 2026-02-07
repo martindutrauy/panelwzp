@@ -262,6 +262,7 @@ export type ChatWhereInput = {
   profilePhotoUrl?: Prisma.StringNullableFilter<"Chat"> | string | null
   device?: Prisma.XOR<Prisma.DeviceScalarRelationFilter, Prisma.DeviceWhereInput>
   messages?: Prisma.MessageListRelationFilter
+  aliases?: Prisma.ChatAliasListRelationFilter
 }
 
 export type ChatOrderByWithRelationInput = {
@@ -277,6 +278,7 @@ export type ChatOrderByWithRelationInput = {
   profilePhotoUrl?: Prisma.SortOrderInput | Prisma.SortOrder
   device?: Prisma.DeviceOrderByWithRelationInput
   messages?: Prisma.MessageOrderByRelationAggregateInput
+  aliases?: Prisma.ChatAliasOrderByRelationAggregateInput
   _relevance?: Prisma.ChatOrderByRelevanceInput
 }
 
@@ -297,6 +299,7 @@ export type ChatWhereUniqueInput = Prisma.AtLeast<{
   profilePhotoUrl?: Prisma.StringNullableFilter<"Chat"> | string | null
   device?: Prisma.XOR<Prisma.DeviceScalarRelationFilter, Prisma.DeviceWhereInput>
   messages?: Prisma.MessageListRelationFilter
+  aliases?: Prisma.ChatAliasListRelationFilter
 }, "id" | "deviceId_waChatId">
 
 export type ChatOrderByWithAggregationInput = {
@@ -345,6 +348,7 @@ export type ChatCreateInput = {
   profilePhotoUrl?: string | null
   device: Prisma.DeviceCreateNestedOneWithoutChatsInput
   messages?: Prisma.MessageCreateNestedManyWithoutChatInput
+  aliases?: Prisma.ChatAliasCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateInput = {
@@ -359,6 +363,7 @@ export type ChatUncheckedCreateInput = {
   lastMessageAt?: Date | string
   profilePhotoUrl?: string | null
   messages?: Prisma.MessageUncheckedCreateNestedManyWithoutChatInput
+  aliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatUpdateInput = {
@@ -373,6 +378,7 @@ export type ChatUpdateInput = {
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   device?: Prisma.DeviceUpdateOneRequiredWithoutChatsNestedInput
   messages?: Prisma.MessageUpdateManyWithoutChatNestedInput
+  aliases?: Prisma.ChatAliasUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateInput = {
@@ -387,6 +393,7 @@ export type ChatUncheckedUpdateInput = {
   lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   messages?: Prisma.MessageUncheckedUpdateManyWithoutChatNestedInput
+  aliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutChatNestedInput
 }
 
 export type ChatCreateManyInput = {
@@ -556,6 +563,20 @@ export type IntFieldUpdateOperationsInput = {
   divide?: number
 }
 
+export type ChatCreateNestedOneWithoutAliasesInput = {
+  create?: Prisma.XOR<Prisma.ChatCreateWithoutAliasesInput, Prisma.ChatUncheckedCreateWithoutAliasesInput>
+  connectOrCreate?: Prisma.ChatCreateOrConnectWithoutAliasesInput
+  connect?: Prisma.ChatWhereUniqueInput
+}
+
+export type ChatUpdateOneRequiredWithoutAliasesNestedInput = {
+  create?: Prisma.XOR<Prisma.ChatCreateWithoutAliasesInput, Prisma.ChatUncheckedCreateWithoutAliasesInput>
+  connectOrCreate?: Prisma.ChatCreateOrConnectWithoutAliasesInput
+  upsert?: Prisma.ChatUpsertWithoutAliasesInput
+  connect?: Prisma.ChatWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.ChatUpdateToOneWithWhereWithoutAliasesInput, Prisma.ChatUpdateWithoutAliasesInput>, Prisma.ChatUncheckedUpdateWithoutAliasesInput>
+}
+
 export type ChatCreateNestedOneWithoutMessagesInput = {
   create?: Prisma.XOR<Prisma.ChatCreateWithoutMessagesInput, Prisma.ChatUncheckedCreateWithoutMessagesInput>
   connectOrCreate?: Prisma.ChatCreateOrConnectWithoutMessagesInput
@@ -581,6 +602,7 @@ export type ChatCreateWithoutDeviceInput = {
   lastMessageAt?: Date | string
   profilePhotoUrl?: string | null
   messages?: Prisma.MessageCreateNestedManyWithoutChatInput
+  aliases?: Prisma.ChatAliasCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateWithoutDeviceInput = {
@@ -594,6 +616,7 @@ export type ChatUncheckedCreateWithoutDeviceInput = {
   lastMessageAt?: Date | string
   profilePhotoUrl?: string | null
   messages?: Prisma.MessageUncheckedCreateNestedManyWithoutChatInput
+  aliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatCreateOrConnectWithoutDeviceInput = {
@@ -638,6 +661,78 @@ export type ChatScalarWhereInput = {
   profilePhotoUrl?: Prisma.StringNullableFilter<"Chat"> | string | null
 }
 
+export type ChatCreateWithoutAliasesInput = {
+  id?: string
+  waChatId: string
+  name?: string | null
+  customName?: string | null
+  isGroup?: boolean
+  unreadCount?: number
+  priorityScore?: number
+  lastMessageAt?: Date | string
+  profilePhotoUrl?: string | null
+  device: Prisma.DeviceCreateNestedOneWithoutChatsInput
+  messages?: Prisma.MessageCreateNestedManyWithoutChatInput
+}
+
+export type ChatUncheckedCreateWithoutAliasesInput = {
+  id?: string
+  deviceId: string
+  waChatId: string
+  name?: string | null
+  customName?: string | null
+  isGroup?: boolean
+  unreadCount?: number
+  priorityScore?: number
+  lastMessageAt?: Date | string
+  profilePhotoUrl?: string | null
+  messages?: Prisma.MessageUncheckedCreateNestedManyWithoutChatInput
+}
+
+export type ChatCreateOrConnectWithoutAliasesInput = {
+  where: Prisma.ChatWhereUniqueInput
+  create: Prisma.XOR<Prisma.ChatCreateWithoutAliasesInput, Prisma.ChatUncheckedCreateWithoutAliasesInput>
+}
+
+export type ChatUpsertWithoutAliasesInput = {
+  update: Prisma.XOR<Prisma.ChatUpdateWithoutAliasesInput, Prisma.ChatUncheckedUpdateWithoutAliasesInput>
+  create: Prisma.XOR<Prisma.ChatCreateWithoutAliasesInput, Prisma.ChatUncheckedCreateWithoutAliasesInput>
+  where?: Prisma.ChatWhereInput
+}
+
+export type ChatUpdateToOneWithWhereWithoutAliasesInput = {
+  where?: Prisma.ChatWhereInput
+  data: Prisma.XOR<Prisma.ChatUpdateWithoutAliasesInput, Prisma.ChatUncheckedUpdateWithoutAliasesInput>
+}
+
+export type ChatUpdateWithoutAliasesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  waChatId?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
+  lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  device?: Prisma.DeviceUpdateOneRequiredWithoutChatsNestedInput
+  messages?: Prisma.MessageUpdateManyWithoutChatNestedInput
+}
+
+export type ChatUncheckedUpdateWithoutAliasesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  deviceId?: Prisma.StringFieldUpdateOperationsInput | string
+  waChatId?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  customName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isGroup?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  unreadCount?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
+  lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  messages?: Prisma.MessageUncheckedUpdateManyWithoutChatNestedInput
+}
+
 export type ChatCreateWithoutMessagesInput = {
   id?: string
   waChatId: string
@@ -649,6 +744,7 @@ export type ChatCreateWithoutMessagesInput = {
   lastMessageAt?: Date | string
   profilePhotoUrl?: string | null
   device: Prisma.DeviceCreateNestedOneWithoutChatsInput
+  aliases?: Prisma.ChatAliasCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateWithoutMessagesInput = {
@@ -662,6 +758,7 @@ export type ChatUncheckedCreateWithoutMessagesInput = {
   priorityScore?: number
   lastMessageAt?: Date | string
   profilePhotoUrl?: string | null
+  aliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatCreateOrConnectWithoutMessagesInput = {
@@ -691,6 +788,7 @@ export type ChatUpdateWithoutMessagesInput = {
   lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   device?: Prisma.DeviceUpdateOneRequiredWithoutChatsNestedInput
+  aliases?: Prisma.ChatAliasUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateWithoutMessagesInput = {
@@ -704,6 +802,7 @@ export type ChatUncheckedUpdateWithoutMessagesInput = {
   priorityScore?: Prisma.IntFieldUpdateOperationsInput | number
   lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  aliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutChatNestedInput
 }
 
 export type ChatCreateManyDeviceInput = {
@@ -729,6 +828,7 @@ export type ChatUpdateWithoutDeviceInput = {
   lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   messages?: Prisma.MessageUpdateManyWithoutChatNestedInput
+  aliases?: Prisma.ChatAliasUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateWithoutDeviceInput = {
@@ -742,6 +842,7 @@ export type ChatUncheckedUpdateWithoutDeviceInput = {
   lastMessageAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   profilePhotoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   messages?: Prisma.MessageUncheckedUpdateManyWithoutChatNestedInput
+  aliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateManyWithoutDeviceInput = {
@@ -763,10 +864,12 @@ export type ChatUncheckedUpdateManyWithoutDeviceInput = {
 
 export type ChatCountOutputType = {
   messages: number
+  aliases: number
 }
 
 export type ChatCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   messages?: boolean | ChatCountOutputTypeCountMessagesArgs
+  aliases?: boolean | ChatCountOutputTypeCountAliasesArgs
 }
 
 /**
@@ -786,6 +889,13 @@ export type ChatCountOutputTypeCountMessagesArgs<ExtArgs extends runtime.Types.E
   where?: Prisma.MessageWhereInput
 }
 
+/**
+ * ChatCountOutputType without action
+ */
+export type ChatCountOutputTypeCountAliasesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.ChatAliasWhereInput
+}
+
 
 export type ChatSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -800,6 +910,7 @@ export type ChatSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   profilePhotoUrl?: boolean
   device?: boolean | Prisma.DeviceDefaultArgs<ExtArgs>
   messages?: boolean | Prisma.Chat$messagesArgs<ExtArgs>
+  aliases?: boolean | Prisma.Chat$aliasesArgs<ExtArgs>
   _count?: boolean | Prisma.ChatCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["chat"]>
 
@@ -822,6 +933,7 @@ export type ChatOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = run
 export type ChatInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   device?: boolean | Prisma.DeviceDefaultArgs<ExtArgs>
   messages?: boolean | Prisma.Chat$messagesArgs<ExtArgs>
+  aliases?: boolean | Prisma.Chat$aliasesArgs<ExtArgs>
   _count?: boolean | Prisma.ChatCountOutputTypeDefaultArgs<ExtArgs>
 }
 
@@ -830,6 +942,7 @@ export type $ChatPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   objects: {
     device: Prisma.$DevicePayload<ExtArgs>
     messages: Prisma.$MessagePayload<ExtArgs>[]
+    aliases: Prisma.$ChatAliasPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1184,6 +1297,7 @@ export interface Prisma__ChatClient<T, Null = never, ExtArgs extends runtime.Typ
   readonly [Symbol.toStringTag]: "PrismaPromise"
   device<T extends Prisma.DeviceDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.DeviceDefaultArgs<ExtArgs>>): Prisma.Prisma__DeviceClient<runtime.Types.Result.GetResult<Prisma.$DevicePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   messages<T extends Prisma.Chat$messagesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Chat$messagesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$MessagePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  aliases<T extends Prisma.Chat$aliasesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Chat$aliasesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ChatAliasPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1587,6 +1701,30 @@ export type Chat$messagesArgs<ExtArgs extends runtime.Types.Extensions.InternalA
   take?: number
   skip?: number
   distinct?: Prisma.MessageScalarFieldEnum | Prisma.MessageScalarFieldEnum[]
+}
+
+/**
+ * Chat.aliases
+ */
+export type Chat$aliasesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the ChatAlias
+   */
+  select?: Prisma.ChatAliasSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the ChatAlias
+   */
+  omit?: Prisma.ChatAliasOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ChatAliasInclude<ExtArgs> | null
+  where?: Prisma.ChatAliasWhereInput
+  orderBy?: Prisma.ChatAliasOrderByWithRelationInput | Prisma.ChatAliasOrderByWithRelationInput[]
+  cursor?: Prisma.ChatAliasWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.ChatAliasScalarFieldEnum | Prisma.ChatAliasScalarFieldEnum[]
 }
 
 /**

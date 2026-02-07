@@ -192,6 +192,7 @@ export type DeviceWhereInput = {
   lastUpdate?: Prisma.DateTimeFilter<"Device"> | Date | string
   sessions?: Prisma.MessageListRelationFilter
   chats?: Prisma.ChatListRelationFilter
+  chatAliases?: Prisma.ChatAliasListRelationFilter
 }
 
 export type DeviceOrderByWithRelationInput = {
@@ -203,6 +204,7 @@ export type DeviceOrderByWithRelationInput = {
   lastUpdate?: Prisma.SortOrder
   sessions?: Prisma.MessageOrderByRelationAggregateInput
   chats?: Prisma.ChatOrderByRelationAggregateInput
+  chatAliases?: Prisma.ChatAliasOrderByRelationAggregateInput
   _relevance?: Prisma.DeviceOrderByRelevanceInput
 }
 
@@ -218,6 +220,7 @@ export type DeviceWhereUniqueInput = Prisma.AtLeast<{
   lastUpdate?: Prisma.DateTimeFilter<"Device"> | Date | string
   sessions?: Prisma.MessageListRelationFilter
   chats?: Prisma.ChatListRelationFilter
+  chatAliases?: Prisma.ChatAliasListRelationFilter
 }, "id">
 
 export type DeviceOrderByWithAggregationInput = {
@@ -253,6 +256,7 @@ export type DeviceCreateInput = {
   lastUpdate?: Date | string
   sessions?: Prisma.MessageCreateNestedManyWithoutDeviceInput
   chats?: Prisma.ChatCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceUncheckedCreateInput = {
@@ -264,6 +268,7 @@ export type DeviceUncheckedCreateInput = {
   lastUpdate?: Date | string
   sessions?: Prisma.MessageUncheckedCreateNestedManyWithoutDeviceInput
   chats?: Prisma.ChatUncheckedCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceUpdateInput = {
@@ -275,6 +280,7 @@ export type DeviceUpdateInput = {
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.MessageUpdateManyWithoutDeviceNestedInput
   chats?: Prisma.ChatUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUpdateManyWithoutDeviceNestedInput
 }
 
 export type DeviceUncheckedUpdateInput = {
@@ -286,6 +292,7 @@ export type DeviceUncheckedUpdateInput = {
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.MessageUncheckedUpdateManyWithoutDeviceNestedInput
   chats?: Prisma.ChatUncheckedUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutDeviceNestedInput
 }
 
 export type DeviceCreateManyInput = {
@@ -379,6 +386,20 @@ export type DeviceUpdateOneRequiredWithoutChatsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.DeviceUpdateToOneWithWhereWithoutChatsInput, Prisma.DeviceUpdateWithoutChatsInput>, Prisma.DeviceUncheckedUpdateWithoutChatsInput>
 }
 
+export type DeviceCreateNestedOneWithoutChatAliasesInput = {
+  create?: Prisma.XOR<Prisma.DeviceCreateWithoutChatAliasesInput, Prisma.DeviceUncheckedCreateWithoutChatAliasesInput>
+  connectOrCreate?: Prisma.DeviceCreateOrConnectWithoutChatAliasesInput
+  connect?: Prisma.DeviceWhereUniqueInput
+}
+
+export type DeviceUpdateOneRequiredWithoutChatAliasesNestedInput = {
+  create?: Prisma.XOR<Prisma.DeviceCreateWithoutChatAliasesInput, Prisma.DeviceUncheckedCreateWithoutChatAliasesInput>
+  connectOrCreate?: Prisma.DeviceCreateOrConnectWithoutChatAliasesInput
+  upsert?: Prisma.DeviceUpsertWithoutChatAliasesInput
+  connect?: Prisma.DeviceWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.DeviceUpdateToOneWithWhereWithoutChatAliasesInput, Prisma.DeviceUpdateWithoutChatAliasesInput>, Prisma.DeviceUncheckedUpdateWithoutChatAliasesInput>
+}
+
 export type DeviceCreateNestedOneWithoutSessionsInput = {
   create?: Prisma.XOR<Prisma.DeviceCreateWithoutSessionsInput, Prisma.DeviceUncheckedCreateWithoutSessionsInput>
   connectOrCreate?: Prisma.DeviceCreateOrConnectWithoutSessionsInput
@@ -401,6 +422,7 @@ export type DeviceCreateWithoutChatsInput = {
   qr?: string | null
   lastUpdate?: Date | string
   sessions?: Prisma.MessageCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceUncheckedCreateWithoutChatsInput = {
@@ -411,6 +433,7 @@ export type DeviceUncheckedCreateWithoutChatsInput = {
   qr?: string | null
   lastUpdate?: Date | string
   sessions?: Prisma.MessageUncheckedCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceCreateOrConnectWithoutChatsInput = {
@@ -437,6 +460,7 @@ export type DeviceUpdateWithoutChatsInput = {
   qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.MessageUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUpdateManyWithoutDeviceNestedInput
 }
 
 export type DeviceUncheckedUpdateWithoutChatsInput = {
@@ -447,6 +471,67 @@ export type DeviceUncheckedUpdateWithoutChatsInput = {
   qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.MessageUncheckedUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutDeviceNestedInput
+}
+
+export type DeviceCreateWithoutChatAliasesInput = {
+  id?: string
+  name: string
+  number?: string | null
+  status?: string
+  qr?: string | null
+  lastUpdate?: Date | string
+  sessions?: Prisma.MessageCreateNestedManyWithoutDeviceInput
+  chats?: Prisma.ChatCreateNestedManyWithoutDeviceInput
+}
+
+export type DeviceUncheckedCreateWithoutChatAliasesInput = {
+  id?: string
+  name: string
+  number?: string | null
+  status?: string
+  qr?: string | null
+  lastUpdate?: Date | string
+  sessions?: Prisma.MessageUncheckedCreateNestedManyWithoutDeviceInput
+  chats?: Prisma.ChatUncheckedCreateNestedManyWithoutDeviceInput
+}
+
+export type DeviceCreateOrConnectWithoutChatAliasesInput = {
+  where: Prisma.DeviceWhereUniqueInput
+  create: Prisma.XOR<Prisma.DeviceCreateWithoutChatAliasesInput, Prisma.DeviceUncheckedCreateWithoutChatAliasesInput>
+}
+
+export type DeviceUpsertWithoutChatAliasesInput = {
+  update: Prisma.XOR<Prisma.DeviceUpdateWithoutChatAliasesInput, Prisma.DeviceUncheckedUpdateWithoutChatAliasesInput>
+  create: Prisma.XOR<Prisma.DeviceCreateWithoutChatAliasesInput, Prisma.DeviceUncheckedCreateWithoutChatAliasesInput>
+  where?: Prisma.DeviceWhereInput
+}
+
+export type DeviceUpdateToOneWithWhereWithoutChatAliasesInput = {
+  where?: Prisma.DeviceWhereInput
+  data: Prisma.XOR<Prisma.DeviceUpdateWithoutChatAliasesInput, Prisma.DeviceUncheckedUpdateWithoutChatAliasesInput>
+}
+
+export type DeviceUpdateWithoutChatAliasesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  status?: Prisma.StringFieldUpdateOperationsInput | string
+  qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.MessageUpdateManyWithoutDeviceNestedInput
+  chats?: Prisma.ChatUpdateManyWithoutDeviceNestedInput
+}
+
+export type DeviceUncheckedUpdateWithoutChatAliasesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  status?: Prisma.StringFieldUpdateOperationsInput | string
+  qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  sessions?: Prisma.MessageUncheckedUpdateManyWithoutDeviceNestedInput
+  chats?: Prisma.ChatUncheckedUpdateManyWithoutDeviceNestedInput
 }
 
 export type DeviceCreateWithoutSessionsInput = {
@@ -457,6 +542,7 @@ export type DeviceCreateWithoutSessionsInput = {
   qr?: string | null
   lastUpdate?: Date | string
   chats?: Prisma.ChatCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceUncheckedCreateWithoutSessionsInput = {
@@ -467,6 +553,7 @@ export type DeviceUncheckedCreateWithoutSessionsInput = {
   qr?: string | null
   lastUpdate?: Date | string
   chats?: Prisma.ChatUncheckedCreateNestedManyWithoutDeviceInput
+  chatAliases?: Prisma.ChatAliasUncheckedCreateNestedManyWithoutDeviceInput
 }
 
 export type DeviceCreateOrConnectWithoutSessionsInput = {
@@ -493,6 +580,7 @@ export type DeviceUpdateWithoutSessionsInput = {
   qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   chats?: Prisma.ChatUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUpdateManyWithoutDeviceNestedInput
 }
 
 export type DeviceUncheckedUpdateWithoutSessionsInput = {
@@ -503,6 +591,7 @@ export type DeviceUncheckedUpdateWithoutSessionsInput = {
   qr?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastUpdate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   chats?: Prisma.ChatUncheckedUpdateManyWithoutDeviceNestedInput
+  chatAliases?: Prisma.ChatAliasUncheckedUpdateManyWithoutDeviceNestedInput
 }
 
 
@@ -513,11 +602,13 @@ export type DeviceUncheckedUpdateWithoutSessionsInput = {
 export type DeviceCountOutputType = {
   sessions: number
   chats: number
+  chatAliases: number
 }
 
 export type DeviceCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   sessions?: boolean | DeviceCountOutputTypeCountSessionsArgs
   chats?: boolean | DeviceCountOutputTypeCountChatsArgs
+  chatAliases?: boolean | DeviceCountOutputTypeCountChatAliasesArgs
 }
 
 /**
@@ -544,6 +635,13 @@ export type DeviceCountOutputTypeCountChatsArgs<ExtArgs extends runtime.Types.Ex
   where?: Prisma.ChatWhereInput
 }
 
+/**
+ * DeviceCountOutputType without action
+ */
+export type DeviceCountOutputTypeCountChatAliasesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.ChatAliasWhereInput
+}
+
 
 export type DeviceSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -554,6 +652,7 @@ export type DeviceSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   lastUpdate?: boolean
   sessions?: boolean | Prisma.Device$sessionsArgs<ExtArgs>
   chats?: boolean | Prisma.Device$chatsArgs<ExtArgs>
+  chatAliases?: boolean | Prisma.Device$chatAliasesArgs<ExtArgs>
   _count?: boolean | Prisma.DeviceCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["device"]>
 
@@ -572,6 +671,7 @@ export type DeviceOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
 export type DeviceInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   sessions?: boolean | Prisma.Device$sessionsArgs<ExtArgs>
   chats?: boolean | Prisma.Device$chatsArgs<ExtArgs>
+  chatAliases?: boolean | Prisma.Device$chatAliasesArgs<ExtArgs>
   _count?: boolean | Prisma.DeviceCountOutputTypeDefaultArgs<ExtArgs>
 }
 
@@ -580,6 +680,7 @@ export type $DevicePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
   objects: {
     sessions: Prisma.$MessagePayload<ExtArgs>[]
     chats: Prisma.$ChatPayload<ExtArgs>[]
+    chatAliases: Prisma.$ChatAliasPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -930,6 +1031,7 @@ export interface Prisma__DeviceClient<T, Null = never, ExtArgs extends runtime.T
   readonly [Symbol.toStringTag]: "PrismaPromise"
   sessions<T extends Prisma.Device$sessionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Device$sessionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$MessagePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   chats<T extends Prisma.Device$chatsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Device$chatsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ChatPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  chatAliases<T extends Prisma.Device$chatAliasesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Device$chatAliasesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ChatAliasPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1353,6 +1455,30 @@ export type Device$chatsArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
   take?: number
   skip?: number
   distinct?: Prisma.ChatScalarFieldEnum | Prisma.ChatScalarFieldEnum[]
+}
+
+/**
+ * Device.chatAliases
+ */
+export type Device$chatAliasesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the ChatAlias
+   */
+  select?: Prisma.ChatAliasSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the ChatAlias
+   */
+  omit?: Prisma.ChatAliasOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ChatAliasInclude<ExtArgs> | null
+  where?: Prisma.ChatAliasWhereInput
+  orderBy?: Prisma.ChatAliasOrderByWithRelationInput | Prisma.ChatAliasOrderByWithRelationInput[]
+  cursor?: Prisma.ChatAliasWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.ChatAliasScalarFieldEnum | Prisma.ChatAliasScalarFieldEnum[]
 }
 
 /**
